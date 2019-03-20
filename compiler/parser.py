@@ -2,7 +2,7 @@
 
 import ply.yacc as yacc
 
-from scanner import tokens, syntax_error
+from scanner import tokens, syntax_error, lexer
 from symtable import (
     push, pop, current_entity, lookup, Module, Opmode, Subroutine, Function,
     Use, Typedef,
@@ -29,7 +29,6 @@ def p_empty_tuple(p):
     pos_arguments :
     kw_arguments :
     simple_exprs :
-    simple_statements :
     '''
     p[0] = ()
 
@@ -101,11 +100,17 @@ def p_1tuple(p):
     '''
     conditions : condition
     actions : action
-    idents : IDENT
     pos1_arguments : simple_expr
     statements1 : statement
     '''
     p[0] = (p[1],)
+
+
+def p_2tuple(p):
+    '''
+    idents : IDENT ',' IDENT
+    '''
+    p[0] = (p[1], p[3])
 
 
 def p_append(p):
@@ -115,7 +120,6 @@ def p_append(p):
     conditions : conditions condition
     actions : actions action
     kw_argument : KEYWORD pos1_arguments
-    simple_statements : simple_statements simple_statement NEWLINE
     '''
     p[0] = p[1] + (p[2],)
 
@@ -316,7 +320,16 @@ def p_error(t):
 parser = yacc.yacc()
 
 
+def parse(filename):
+    lexer.filename = filename
+    with open(filename) as f:
+        lexer.input(f.read())
+    return parser.parse()
+
+
 if __name__ == "__main__":
     import sys
 
-    parser
+    assert len(sys.argv) == 2
+    print(parse(sys.argv[1]))
+
