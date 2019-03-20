@@ -27,7 +27,6 @@ precedence = (   # lowest to highest
 def p_empty_tuple(p):
     '''
     pos_arguments :
-    pos_arguments_no_uminus :
     kw_arguments :
     simple_exprs :
     simple_statements :
@@ -37,19 +36,15 @@ def p_empty_tuple(p):
 
 def p_first(p):
     '''
-    simple_expr_no_uminus : STRING
-                          | FLOAT
-                          | INTEGER
-                          | BOOL
-                          | lvalue
-    simple_expr : simple_expr_no_uminus
-    simple_expr : uminus_expr
-    expr : simple_expr
+    simple_expr : STRING
+                | FLOAT
+                | INTEGER
+                | BOOL
+                | lvalue
     statement : simple_statement NEWLINE
               | dlt
     lvalue : IDENT
     pos_arguments : pos1_arguments
-    pos_arguments_no_uminus : pos1_arguments_no_uminus
     block : statements1
     simple_exprs : simple1_exprs
     simple1_exprs : simple_expr
@@ -59,7 +54,7 @@ def p_first(p):
 
 def p_second(p):
     '''
-    simple_expr_no_uminus : '(' expr ')'
+    simple_expr : '(' expr ')'
     returning_opt : RETURNING idents
     taking_opt : TAKING idents
     '''
@@ -108,7 +103,6 @@ def p_1tuple(p):
     actions : action
     idents : IDENT
     pos1_arguments : simple_expr
-    pos1_arguments_no_uminus : simple_expr_no_uminus
     statements1 :
     '''
     p[0] = (p[1],)
@@ -130,7 +124,6 @@ def p_append2(p):
     '''
     idents : idents ',' IDENT
     pos1_arguments : pos1_arguments ',' simple_expr
-    pos1_arguments_no_uminus : pos1_arguments_no_uminus ',' simple_expr
     simple1_exprs : simple1_exprs ',' simple_expr
     '''
     p[0] = p[1] + (p[3],)
@@ -139,51 +132,34 @@ def p_append2(p):
 def p_all(p):
     """
     arguments : pos_arguments kw_arguments
-    arguments_no_uminus : pos_arguments_no_uminus kw_arguments
-    simple_expr_no_uminus : QUOTE lvalue
-                          | NOT simple_expr
-                          | simple_expr_no_uminus '^' simple_expr
-                          | simple_expr_no_uminus '*' simple_expr
-                          | simple_expr_no_uminus '/' simple_expr
-                          | simple_expr_no_uminus '%' simple_expr
-                          | simple_expr_no_uminus '+' simple_expr
-                          | simple_expr_no_uminus '-' simple_expr
-                          | simple_expr_no_uminus '<' simple_expr
-                          | simple_expr_no_uminus LEQ simple_expr
-                          | simple_expr_no_uminus LAEQ simple_expr
-                          | simple_expr_no_uminus '>' simple_expr
-                          | simple_expr_no_uminus GEQ simple_expr
-                          | simple_expr_no_uminus GAEQ simple_expr
-                          | simple_expr_no_uminus EQ simple_expr
-                          | simple_expr_no_uminus AEQ simple_expr
-                          | simple_expr_no_uminus NEQ simple_expr
-                          | simple_expr_no_uminus NAEQ simple_expr
-    uminus_expr : '-' simple_expr  %prec UMINUS
-                | uminus_expr '^' simple_expr
-                | uminus_expr '*' simple_expr
-                | uminus_expr '/' simple_expr
-                | uminus_expr '%' simple_expr
-                | uminus_expr '+' simple_expr
-                | uminus_expr '-' simple_expr
-                | uminus_expr '<' simple_expr
-                | uminus_expr LEQ simple_expr
-                | uminus_expr LAEQ simple_expr
-                | uminus_expr '>' simple_expr
-                | uminus_expr GEQ simple_expr
-                | uminus_expr GAEQ simple_expr
-                | uminus_expr EQ simple_expr
-                | uminus_expr AEQ simple_expr
-                | uminus_expr NEQ simple_expr
-                | uminus_expr NAEQ simple_expr
+    simple_expr : QUOTE lvalue
+                | NOT simple_expr
+                | simple_expr '^' simple_expr
+                | simple_expr '*' simple_expr
+                | simple_expr '/' simple_expr
+                | simple_expr '%' simple_expr
+                | simple_expr '+' simple_expr
+                | simple_expr '-' simple_expr
+                | '-' simple_expr               %prec UMINUS
+                | simple_expr '<' simple_expr
+                | simple_expr LEQ simple_expr
+                | simple_expr LAEQ simple_expr
+                | simple_expr '>' simple_expr
+                | simple_expr GEQ simple_expr
+                | simple_expr GAEQ simple_expr
+                | simple_expr EQ simple_expr
+                | simple_expr AEQ simple_expr
+                | simple_expr NEQ simple_expr
+                | simple_expr NAEQ simple_expr
     simple_statement : PASS
-                     | lvalue arguments_no_uminus
-                     | PREPARE lvalue arguments_no_uminus
+                     | lvalue arguments
+                     | PREPARE lvalue arguments
                      | REUSE simple_expr
                      | RELEASE lvalue
                      | lvalue '=' expr
-                     | idents '=' lvalue arguments_no_uminus
+                     | idents '=' lvalue arguments
                      | lvalue OPEQ expr
-                     | lvalue arguments_no_uminus RETURNING_TO simple_expr
+                     | lvalue arguments RETURNING_TO simple_expr
                      | REUSE simple_expr RETURNING_TO simple_expr
                      | GOTO simple_expr pos_arguments
                      | RETURN simple_exprs
@@ -195,7 +171,7 @@ def p_all(p):
 
 
 def p_expr(p):
-    'expr : lvalue arguments_no_uminus'
+    'expr : simple_expr arguments'
     if any(p[2]):
         p[0] = ('call', p[1], p[2])
     else:
