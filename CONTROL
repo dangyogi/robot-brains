@@ -1,0 +1,98 @@
+3 types of control transfer:
+
+    - goto <label>
+        - no explicit arguments
+        - no implicit return address passed
+
+    - return <exp>
+        - passes explicit argument(s)
+        - no implicit return address passed
+
+    - function/subroutine call
+        - passes explicit argument(s)
+        - passes implicit return address
+
+
+function/subroutine call
+    - passes return address (in addition to explicit arguments)
+        - labeled "return^" in called function/subroutine
+        - return address can take (required) parameters
+            - call as <simple_statement> expects no parameters
+            - call in <exp> expects one parameter
+            - special assignment for one or more parameters
+
+return
+    - does not pass return address
+    - may pass zero or more (positional) parameters
+    - may only be used once, implies the termination of the calling
+      function/subroutine (and it now being available for re-use)
+
+
+coroutine
+    - two cooperating blocks of code passing control back and forth between
+      them.
+        - One is the "caller", which is the one initiating the sequence.
+        - The other is the "coroutine" (started by the "caller").
+        - Both the "caller" and the "coroutine" have to agree how to tell when
+          the sequence is done.
+        - Generally, only the "caller" is running at the end of the sequence.
+    - in caller
+        - start the coroutine as a function call, which returns (as a minimum)
+          a continuation address.  The continuation address would be stored in
+          a variable by the caller.  The coroutine function does not take any
+          special parameters.
+            - !next_step = coroutine arg...
+            - the return type of the coroutine is:
+                - type foo is function taking ... and returning foo
+        - caller then calls the continuation address as a function call,
+          passing any arguments agreed on.
+            - The return address passed is used by the coroutine as the
+              callback to the caller.
+            - the continuation returns a new continuation address (along with
+              whatever else is agreed on).
+            - e.g., !next_step = !next_step arg...
+    - in coroutine
+        - transfers back to caller by calling return^ as a function call, which
+          returns (as a minimum) a continuation address.  The continuation
+          address would be stored in a variable and used for the next transfer
+          back to the caller.
+            - !next_step = !return arg...
+            - the type of !next_step is:
+                - type bar is function taking ... and returning bar
+
+
+producer/consumer:
+    - use coroutines, the consumer is the "caller", and the producer is the
+      "coroutine".
+    - origin producer
+        - acts as coroutine
+        - gets coroutine to produce to as explicit parameter
+            - coroutine takes value and next_value function as arguments
+            - coroutine called once per value
+        - does normal "return" when done (no more values)
+    - consumer
+        - passes consumer subroutine
+
+
+tasker
+    - is just another module
+    - provides:
+        - "fork" <subroutine> subroutine
+            - calls subroutine during current cycle
+            - subroutine is terminated when it returns (at any point in the
+              future, i.e., on this or any future cycle)
+            - all threads are terminated when the "STOP" button is hit on the
+              driver station.
+        - "wait" subroutine
+            - suspends until all child subroutines have terminated
+            - returns immediately if there are no child subroutines
+        - "next" subroutine
+            - called by thread to wait for next cycle and then continue
+        - "finally" <label> subroutine
+            - called by thread to register a termination subroutine
+            - finally subroutine must not call "next"
+            - finally subroutine is called when the current thread does its
+              final return, or when the "STOP" button the driver station is
+              pressed.
+            - finally subroutine will only be called once
+

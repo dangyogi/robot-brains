@@ -1,0 +1,48 @@
+# Run automatically when the INIT button on the Driver Station phone is hit.
+subroutine init
+    set leftMotor.reversed? to: True
+
+# Run automatically when the START button on the Driver Station phone is hit.
+subroutine start
+    move 5ft
+
+
+
+function getPosition start = 0
+    set position to:
+    -> (leftMotor.position + rightMotor.position) / 2 / 66.7 - start
+    telemetry.report key: "position" value: position
+    return position
+
+subroutine move dist
+    ===========================================================
+    dist >= 0      | yn  # comments are allowed here too!
+    ===========================================================
+    goto forward   | X
+    goto backward  |  X
+    ===========================================================
+
+label forward
+    set start to: getPosition
+    ===========================================================
+    isActive                                  | nyy
+    getPosition start < dist                  | -yn
+    ===========================================================
+    set dual leftMotor: 100% rightMotor: 100% |  X
+    next forward                              |
+    set dual leftMotor: 0 rightMotor: 0       | X X
+    return                                    |
+    ===========================================================
+
+label backward
+    set start to: getPosition
+    ===========================================================
+    isActive                                    | nyy
+    getPosition start > dist                    | -yn
+    ===========================================================
+    set dual leftMotor: -100%                   |  X
+          -> rightMotor: -100%                  |
+    next backward                               |
+    set dual leftMotor: 0 rightMotor: 0         | X X
+    return                                      |
+    ===========================================================

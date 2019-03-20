@@ -1,0 +1,51 @@
+comments:
+    - # to end-of-line
+    - or "REM" to end-of-line?
+
+line continuation:
+    - -> as first non-whitespace on next line
+    - applies to the code before the | (if any) in the line above
+
+identifiers:
+    - letters, digits, underscore (not starting with digit)
+    - global (module level) start with Capital
+        - no, declared with "global" like python...
+    - strings end with $
+    - booleans end with ?
+    - integers start with i-n (I-N for globals)
+    - else float
+    - arrays are dimensioned
+
+literals:
+    - strings:
+        - string literals use double quotes, all on one line
+        - embedded double quotes must be doubled
+        - no other escaping is provided (e.g., no \ escapes like \n)
+        - no string literal concatenation
+        - no embedded variable substitutions (as part of the literal)
+    - integers:
+        - [digit]+
+        - no support for different bases
+    - floats:
+        - standard float literal formats
+        - fractional
+            - digit*.digit+/digit+
+    - units (follow literal):
+        - all units are part of the literal representation and are converted
+          to a common base unit so that the resulting literal value no longer
+          has a unit associated with it
+        - lengths (in, mm, cm, m, ft)
+            - converted to inches
+        - time (sec, msec, usec, nsec, min)
+            - converted to seconds
+        - angles (degrees, radians, rotations)
+            - converted to degrees
+        - force (oz, lbs, newtons (N), dynes (dyn))
+            - converted to lbs
+        - mass (oz, lbs, grams, kgrams)
+            - converted to lbs
+        - acceleration
+            - g
+        - percent (%)
+            - divided by 100
+

@@ -1,0 +1,59 @@
+label
+    statements
+    ====================================================
+    cond               |yny-
+    cond               |yny-
+    cond               |yny-
+    ====================================================
+    statement          |X
+    statement          | X
+    statement
+    statement          | X
+    ====================================================
+    statements
+
+label:
+    name
+    function name {param}
+    subroutine name {param}
+
+param:
+    [name:] name [= exp]
+
+cond:
+    exp
+    exp relop exp
+
+exp:
+    literal
+    variable
+    label
+    ( exp )
+    exp arithop exp
+    label
+    joystick.button
+    joystick.axis
+    motor.position
+    motor.mode
+    motor.power
+    name
+    name ( {[name:] exp} )
+
+
+statement:
+    global name {name}
+    set var to: exp
+    goto label
+    next label
+    return [exp] [[from:] label]
+    reset motor.position
+    set motor.mode to: mode
+    set motor.power to: power
+    set servo.range from: min to: max
+    set servo.position to: position
+    start name {[name:] exp}
+    wait name
+    kill name
+    name {[name:] exp}
+    name ( {[name:] exp} )
+

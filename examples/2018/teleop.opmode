@@ -1,0 +1,19 @@
+teleop opmode
+
+use joystick1 as joystick 1
+
+use drive_train
+
+use arcade_drive drive_train.skid_drive speed_axis: joystick1.Left_Y
+                                     -> turn_axis: joystick1.Right_X
+
+use spinner_motor
+
+use button_driver spinner_motor forward_button: joystick1.X forward_power: 100%
+                             -> reverse_button: joystick1.Y reverse_power: 100%
+
+use arm_motor
+
+use button_driver arm_motor forward_button: joystick1.A forward_power: 100%
+                         -> reverse_button: joystick1.B reverse_power: 100%
+
