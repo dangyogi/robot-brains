@@ -23,10 +23,10 @@ subroutine move dist
     ===========================================================
 
 label forward
-    set start to: getPosition
+    set start to: {getPosition}
     ===========================================================
     isActive                                  | nyy
-    getPosition start < dist                  | -yn
+    {getPosition start} < dist                | -yn
     ===========================================================
     set dual leftMotor: 100% rightMotor: 100% |  X
     next forward                              |
@@ -35,10 +35,10 @@ label forward
     ===========================================================
 
 label backward
-    set start to: getPosition
+    set start to: (get getPosition)
     ===========================================================
     isActive                                    | nyy
-    getPosition start > dist                    | -yn
+    {getPosition start} > dist                  | -yn
     ===========================================================
     set dual leftMotor: -100%                   |  X
           -> rightMotor: -100%                  |

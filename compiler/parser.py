@@ -103,7 +103,7 @@ def p_1tuple(p):
     actions : action
     idents : IDENT
     pos1_arguments : simple_expr
-    statements1 :
+    statements1 : statement
     '''
     p[0] = (p[1],)
 
@@ -171,11 +171,10 @@ def p_all(p):
 
 
 def p_expr(p):
-    'expr : simple_expr arguments'
-    if any(p[2]):
-        p[0] = ('call', p[1], p[2])
-    else:
-        p[0] = p[1]
+    '''
+    expr : '{' GET lvalue arguments '}'
+    '''
+    p[0] = ('get', p[3], p[4])
 
 
 def p_pushopmode(p):

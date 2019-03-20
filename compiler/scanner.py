@@ -11,6 +11,7 @@ reserved = frozenset((
     'AS',
     'DIM',
     'FUNCTION',
+    'GET',
     'GOTO',
     'IS',
     'LABEL',
@@ -107,7 +108,7 @@ t_INITIAL_ignore = ' '
 t_ANY_ignore_COMMENT = r'\#.*'
 
 
-literals = "+-*/%^=<>.()[]"
+literals = "+-*/%^=<>.()[]{}"
 
 last_rest = None
 
