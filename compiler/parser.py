@@ -161,7 +161,7 @@ def p_all(p):
                      | lvalue OPEQ expr
                      | lvalue arguments RETURNING_TO simple_expr
                      | REUSE simple_expr RETURNING_TO simple_expr
-                     | GOTO simple_expr pos_arguments
+                     | GOTO lvalue pos_arguments
                      | RETURN simple_exprs
                      | RETURN simple_exprs TO simple_expr
     lvalue : lvalue '.' IDENT
@@ -289,11 +289,18 @@ def p_condition(p):
     p[0] = (p[1], p[2])
 
 
-def p_action(p):
+def p_action1(p):
     '''
-    action : simple_statement REST NEWLINE simple_statements
+    action : simple_statement NEWLINE
     '''
-    p[0] = p[1], p[4], p[2]
+    p[0] = p[1], ''
+
+
+def p_action2(p):
+    '''
+    action : simple_statement REST NEWLINE
+    '''
+    p[0] = p[1], p[2]
 
 
 def p_pop(p):
