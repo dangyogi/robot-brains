@@ -3,9 +3,6 @@
 from collections import OrderedDict
 
 
-Symtables = []
-
-
 def push(obj):
     Symtables.append(obj)
     return obj
@@ -38,11 +35,29 @@ class Symbol:
         for k, v in kws.items():
             setattr(self, k, v)
 
+    def __repr__(self):
+        return f"<Symbol {self.name}>"
+
+    def dump(self, f, indent = 0):
+        print(f"{indent_str(indent)}Symbol.{self.name}", end='', file=f)
+        if hasattr(self, 'entity'):
+            print(f" entity={self.entity}", end='', file=f)
+        if hasattr(self, 'type'):
+            print(f" type={self.type}", end='', file=f)
+        if hasattr(self, 'scope'):
+            print(f" scope={self.scope}", end='', file=f)
+        print(file=f)
+        if self.entity is not None:
+            self.entity.dump(f, indent + 2)
+
 
 class Use:
     def __init__(self, module_name, arguments):
         self.module_name = module_name
         self.arguments = arguments
+
+    def __repr__(self):
+        return f"<Use {self.module_name} {self.arguments}>"
 
 
 class Typedef:
@@ -51,9 +66,13 @@ class Typedef:
         self.taking = taking
         self.returning = returning
 
+    def __repr__(self):
+        return f"<Typedef {self.code_type} taking {self.taking} " \
+               f"returning {self.returning}>"
 
-def lookup(name, *, type=Symbol, **kws):
-    return Symtables[-1].lookup(name, type=type, **kws)
+
+def lookup(name, *, sym_class=Symbol, **kws):
+    return Symtables[-1].lookup(name, sym_class=sym_class, **kws)
 
 
 class Entity:
@@ -62,13 +81,22 @@ class Entity:
         sym.entity = self
         self.symbols = OrderedDict()
 
-    def lookup(self, name, *, type=Symbol, **kws):
+    def __repr__(self):
+        return f"<{self.__class__.__name__} {self.name}>"
+
+    def lookup(self, name, *, sym_class=Symbol, **kws):
         lname = name.lower()
         if lname in self.symbols:
             return self.symbols[lname]
-        sym = type(name, **kws)
+        sym = sym_class(name, **kws)
         self.symbols[lname] = sym
         return sym
+
+    def dump(self, f, indent = 0):
+        print(f"{indent_str(indent)}{self.__class__.__name__}.{self.name}",
+              file=f)
+        for _, sym in self.symbols.items():
+            sym.dump(f, indent + 2)
 
 
 class Opmode(Entity):
@@ -79,7 +107,7 @@ class Entity_with_parameters(Entity):
     def __init__(self, sym):
         super().__init__(sym)
         self.current_parameters = '__pos__'
-        self.kw_parameters = {'__pos__': self.current_parameters}
+        self.kw_parameters = {'__pos__': []}
 
     def kw_parameter(self, t):
         lkw_name = kw_name.lower()
@@ -111,21 +139,27 @@ class Routine(Entity_with_parameters):
 
     def labeled_block(self, label, params, statements):
         if params:
-            self.lookup(label, type='label',
+            self.lookup(label.name, type='label',
                         generator=Parameterized_block(params, statements))
         else:
-            self.lookup(label, type='label', generator=Block(statements))
+            self.lookup(label.name, type='label', generator=Block(statements))
 
 
 class Block:
     def __init__(self, statements):
         self.statements = statements
 
+    def __repr__(self):
+        return f"<Block>"
+
 
 class Parameterized_block(Block):
     def __init__(self, params, statements):
         super(self).__init__(statements)
         self.parameters = params
+
+    def __repr__(self):
+        return f"<Parameterized_block {self.params}>"
 
 
 class Subroutine(Routine):
@@ -136,3 +170,10 @@ class Function(Routine):
     def __init__(self, sym):
         super().__init__(sym)
         self.return_types = (sym.type,)
+
+
+def indent_str(indent):
+    return " "*indent
+
+
+Symtables = [Entity(Symbol('__file__', type='file'))]

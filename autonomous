@@ -1,3 +1,5 @@
+module autonomous
+
 # Run automatically when the INIT button on the Driver Station phone is hit.
 subroutine init
     set leftMotor.reversed? to: True
@@ -35,7 +37,7 @@ label forward
     ===========================================================
 
 label backward
-    set start to: (get getPosition)
+    set start to: {getPosition}
     ===========================================================
     isActive                                    | nyy
     {getPosition start} > dist                  | -yn

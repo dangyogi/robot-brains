@@ -11,7 +11,6 @@ reserved = frozenset((
     'AS',
     'DIM',
     'FUNCTION',
-    'GET',
     'GOTO',
     'IS',
     'LABEL',
@@ -125,11 +124,11 @@ def t_NEWLINE(t):
     r'\n+'
     global last_rest
     #print("t_NEWLINE", repr(t.value), "at", t.lexer.lineno, t.lexpos)
+    t.lexer.lineno += len(t.value)
     if last_rest is not None:
         #print("t_NEWLINE returning last_rest", last_rest)
         t = last_rest
         last_rest = None
-    t.lexer.lineno += len(t.value)
     return t
 
 
@@ -299,7 +298,7 @@ def t_error(t):
 
 
 def convert(t, conversion):
-    if conversion is None: return 1.0
+    if conversion is None: return 1
     segments = conversion.split('/')
     #print("convert", conversion, segments)
     ans = convert_segment(t, segments[0])
@@ -325,19 +324,34 @@ def convert_segment(t, seg):
 
 
 def find_line_start(token):
+    r'''Return the index of the first character of the line.
+    '''
     return token.lexer.lexdata.rfind('\n', 0, token.lexpos) + 1
 
 
 def find_line_end(token):
-    return token.lexer.lexdata.find('\n', 0, token.lexpos) - 1
+    r'''Return the index of the last (non-newline) character of the line.
+
+    Return is < 0 if this is the last line and it doesn't have a newline
+    at the end.
+    '''
+    return token.lexer.lexdata.find('\n', token.lexpos) - 1
 
 
 def find_column(token):
-    return (token.lexpos - find_line_start(token)) + 1
+    ans = (token.lexpos - find_line_start(token)) + 1
+    print(f"find_column({token}) -> {ans}")
+    return ans
 
 
 def find_line(token):
-    return token.lexer.lexdata[find_line_start(token):find_line_end(token)]
+    start = find_line_start(token)
+    end = find_line_end(token)
+    print(f"find_line({token}): start {start}, end {end}")
+    if end < 0:
+        return token.lexer.lexdata[start:]
+    else:
+        return token.lexer.lexdata[start:end + 1]
 
 
 def syntax_error(token, msg, column_offset = 0):

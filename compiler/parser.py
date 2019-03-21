@@ -5,7 +5,7 @@ import ply.yacc as yacc
 from scanner import tokens, syntax_error, lexer
 from symtable import (
     push, pop, current_entity, lookup, Module, Opmode, Subroutine, Function,
-    Use, Typedef,
+    Use, Typedef, Symtables
 )
 
 
@@ -40,7 +40,8 @@ def p_first(p):
                 | INTEGER
                 | BOOL
                 | lvalue
-    statement : simple_statement NEWLINE
+    expr : simple_expr
+    statement : simple_statement newlines
               | dlt
     lvalue : IDENT
     pos_arguments : pos1_arguments
@@ -62,10 +63,10 @@ def p_second(p):
 
 def p_none(p):
     '''
-    file : opmode
-         | module
-    opmode : IDENT OPMODE push_opmode NEWLINE uses
-    module : IDENT MODULE push_module parameters NEWLINE \
+    newlines : NEWLINE
+    newlines : newlines NEWLINE
+    opmode : OPMODE IDENT push_opmode newlines uses
+    module : MODULE IDENT push_module parameters newlines \
              uses typedefs vartypes decls
     typedefs :
              | typedefs typedef
@@ -83,9 +84,9 @@ def p_none(p):
                   | kw_parameters keyword pos1_parameters
     uses :
          | uses use
-    fn_decl : FUNCTION IDENT make_fn parameters set_returning_opt NEWLINE \
+    fn_decl : FUNCTION IDENT make_fn parameters set_returning_opt newlines \
               typedefs vartypes first_block labeled_blocks pop
-    sub_decl : SUBROUTINE IDENT make_sub parameters NEWLINE \
+    sub_decl : SUBROUTINE IDENT make_sub parameters newlines \
                typedefs vartypes first_block labeled_blocks pop
     first_block :
     labeled_blocks :
@@ -119,7 +120,6 @@ def p_append(p):
     statements1 : statements1 statement
     conditions : conditions condition
     actions : actions action
-    kw_argument : KEYWORD pos1_arguments
     '''
     p[0] = p[1] + (p[2],)
 
@@ -136,6 +136,7 @@ def p_append2(p):
 def p_all(p):
     """
     arguments : pos_arguments kw_arguments
+    kw_argument : KEYWORD pos1_arguments
     simple_expr : QUOTE lvalue
                 | NOT simple_expr
                 | simple_expr '^' simple_expr
@@ -174,21 +175,29 @@ def p_all(p):
     p[0] = tuple(p)
 
 
-def p_expr(p):
+def p_file(p):
+    r'''
+    file : opmode
+         | module
     '''
-    expr : '{' GET lvalue arguments '}'
+    p[0] = Symtables[0]
+
+
+def p_simple_expr(p):
     '''
-    p[0] = ('get', p[3], p[4])
+    simple_expr : '{' lvalue arguments '}'
+    '''
+    p[0] = ('get', p[2], p[3])
 
 
 def p_pushopmode(p):
     'push_opmode :'
-    push(Opmode(p[-2]))
+    push(Opmode(p[-1]))
 
 
 def p_pushmodule(p):
     'push_module :'
-    push(Module(p[-2]))
+    push(Module(p[-1]))
 
 
 def p_parameter1(p):
@@ -212,22 +221,22 @@ def p_keyword(p):
 
 def p_use1(p):
     '''
-    use : USE IDENT arguments NEWLINE
+    use : USE IDENT arguments newlines
     '''
     p[2].generator = Use(p[2], p[3])
 
 
 def p_use2(p):
     '''
-    use : USE IDENT AS IDENT arguments NEWLINE
+    use : USE IDENT AS IDENT arguments newlines
     '''
     p[2].generator = Use(p[4], p[5])
 
 
 def p_typedef(p):
     '''
-    typedef : TYPE IDENT IS FUNCTION taking_opt returning_opt NEWLINE
-            | TYPE IDENT IS SUBROUTINE taking_opt NEWLINE
+    typedef : TYPE IDENT IS FUNCTION taking_opt returning_opt newlines
+            | TYPE IDENT IS SUBROUTINE taking_opt newlines
     '''
     p[1].generator = Typedef(*p[4:-1])
 
@@ -241,14 +250,14 @@ def p_set_returning_opt(p):
 
 def p_vartype(p):
     '''
-    vartype : IDENT IS IDENT NEWLINE
+    vartype : IDENT IS IDENT newlines
     '''
     p[1].type = p[3]
 
 
 def p_dim(p):
     '''
-    vartype : DIM IDENT '[' expr ']' NEWLINE
+    vartype : DIM IDENT '[' expr ']' newlines
     '''
     p[2].dim = p[4]
 
@@ -271,7 +280,7 @@ def p_first_block(p):
 
 
 def p_labeled_block(p):
-    'labeled_block : LABEL IDENT pos_parameters NEWLINE block'
+    'labeled_block : LABEL IDENT pos_parameters newlines block'
     current_entity().labeled_block(p[2], p[3], p[5])
 
 
@@ -281,14 +290,14 @@ def p_dlt(p):
           conditions \
           DLT_DELIMITER NEWLINE \
           actions \
-          DLT_DELIMITER NEWLINE
+          DLT_DELIMITER newlines
     '''
     p[0] = ('dlt', p[2], p[4])
 
 
 def p_condition(p):
     '''
-    condition : expr REST NEWLINE
+    condition : expr REST
     '''
     p[0] = (p[1], p[2])
 
@@ -302,7 +311,7 @@ def p_action1(p):
 
 def p_action2(p):
     '''
-    action : simple_statement REST NEWLINE
+    action : simple_statement REST
     '''
     p[0] = p[1], p[2]
 
@@ -320,16 +329,20 @@ def p_error(t):
 parser = yacc.yacc()
 
 
-def parse(filename):
+def parse(filename, debug=False):
     lexer.filename = filename
     with open(filename) as f:
         lexer.input(f.read())
-    return parser.parse()
+    return parser.parse(debug=debug)
 
 
 if __name__ == "__main__":
     import sys
 
     assert len(sys.argv) == 2
-    print(parse(sys.argv[1]))
+    top_entity = parse(sys.argv[1],
+                       )
+                       #debug=True)
+    print("top_entity", top_entity)
+    top_entity.dump(sys.stdout)
 
