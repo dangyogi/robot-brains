@@ -28,33 +28,32 @@ def p_empty_tuple(p):
     '''
     pos_arguments :
     kw_arguments :
-    simple_exprs :
+    exprs :
     '''
     p[0] = ()
 
 
 def p_first(p):
     '''
-    simple_expr : STRING
+    expr : STRING
                 | FLOAT
                 | INTEGER
                 | BOOL
                 | lvalue
-    expr : simple_expr
     statement : simple_statement newlines
               | dlt
     lvalue : IDENT
     pos_arguments : pos1_arguments
     block : statements1
-    simple_exprs : simple1_exprs
-    simple1_exprs : simple_expr
+    exprs : exprs1
+    exprs1 : expr
     '''
     p[0] = p[1]
 
 
 def p_second(p):
     '''
-    simple_expr : '(' expr ')'
+    expr : '(' expr ')'
     returning_opt : RETURNING idents
     taking_opt : TAKING idents
     '''
@@ -101,7 +100,7 @@ def p_1tuple(p):
     '''
     conditions : condition
     actions : action
-    pos1_arguments : simple_expr
+    pos1_arguments : expr
     statements1 : statement
     '''
     p[0] = (p[1],)
@@ -127,8 +126,8 @@ def p_append(p):
 def p_append2(p):
     '''
     idents : idents ',' IDENT
-    pos1_arguments : pos1_arguments ',' simple_expr
-    simple1_exprs : simple1_exprs ',' simple_expr
+    pos1_arguments : pos1_arguments ',' expr
+    exprs1 : exprs1 ',' expr
     '''
     p[0] = p[1] + (p[3],)
 
@@ -137,38 +136,38 @@ def p_all(p):
     """
     arguments : pos_arguments kw_arguments
     kw_argument : KEYWORD pos1_arguments
-    simple_expr : QUOTE lvalue
-                | NOT simple_expr
-                | simple_expr '^' simple_expr
-                | simple_expr '*' simple_expr
-                | simple_expr '/' simple_expr
-                | simple_expr '%' simple_expr
-                | simple_expr '+' simple_expr
-                | simple_expr '-' simple_expr
-                | '-' simple_expr               %prec UMINUS
-                | simple_expr '<' simple_expr
-                | simple_expr LEQ simple_expr
-                | simple_expr LAEQ simple_expr
-                | simple_expr '>' simple_expr
-                | simple_expr GEQ simple_expr
-                | simple_expr GAEQ simple_expr
-                | simple_expr EQ simple_expr
-                | simple_expr AEQ simple_expr
-                | simple_expr NEQ simple_expr
-                | simple_expr NAEQ simple_expr
+    expr : QUOTE lvalue
+                | NOT expr
+                | expr '^' expr
+                | expr '*' expr
+                | expr '/' expr
+                | expr '%' expr
+                | expr '+' expr
+                | expr '-' expr
+                | '-' expr               %prec UMINUS
+                | expr '<' expr
+                | expr LEQ expr
+                | expr LAEQ expr
+                | expr '>' expr
+                | expr GEQ expr
+                | expr GAEQ expr
+                | expr EQ expr
+                | expr AEQ expr
+                | expr NEQ expr
+                | expr NAEQ expr
     simple_statement : PASS
                      | lvalue arguments
                      | PREPARE lvalue arguments
-                     | REUSE simple_expr
+                     | REUSE expr
                      | RELEASE lvalue
                      | lvalue '=' expr
                      | idents '=' lvalue arguments
                      | lvalue OPEQ expr
-                     | lvalue arguments RETURNING_TO simple_expr
-                     | REUSE simple_expr RETURNING_TO simple_expr
+                     | lvalue arguments RETURNING_TO expr
+                     | REUSE expr RETURNING_TO expr
                      | GOTO lvalue pos_arguments
-                     | RETURN simple_exprs
-                     | RETURN simple_exprs TO simple_expr
+                     | RETURN exprs
+                     | RETURN exprs TO expr
     lvalue : lvalue '.' IDENT
     lvalue : lvalue '[' expr ']'
     """
@@ -183,9 +182,9 @@ def p_file(p):
     p[0] = Symtables[0]
 
 
-def p_simple_expr(p):
+def p_expr(p):
     '''
-    simple_expr : '{' lvalue arguments '}'
+    expr : '{' lvalue arguments '}'
     '''
     p[0] = ('get', p[2], p[3])
 
@@ -209,7 +208,7 @@ def p_parameter1(p):
 
 def p_parameter2(p):
     '''
-    parameter : IDENT '=' simple_expr
+    parameter : IDENT '=' expr
     '''
     current_entity().pos_parameter(p[1], p[3])
 
