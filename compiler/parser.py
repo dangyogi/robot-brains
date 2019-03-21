@@ -2,10 +2,11 @@
 
 import ply.yacc as yacc
 
-from scanner import tokens, syntax_error, lexer
+from scanner import tokens, syntax_error, lex_file, Token, check_for_errors
 from symtable import (
-    push, pop, current_entity, lookup, Module, Opmode, Subroutine, Function,
-    Use, Typedef, Symtables
+    pop_namespace, current_namespace, top_namespace, Module, Opmode,
+    Subroutine, Function, Use, Typedef, Labeled_block, Block,
+    DLT, Conditions, Actions, 
 )
 
 
@@ -36,15 +37,14 @@ def p_empty_tuple(p):
 def p_first(p):
     '''
     expr : STRING
-                | FLOAT
-                | INTEGER
-                | BOOL
-                | lvalue
+         | FLOAT
+         | INTEGER
+         | BOOL
+         | lvalue
     statement : simple_statement newlines
               | dlt
     lvalue : IDENT
     pos_arguments : pos1_arguments
-    block : statements1
     exprs : exprs1
     exprs1 : expr
     '''
@@ -64,8 +64,8 @@ def p_none(p):
     '''
     newlines : NEWLINE
     newlines : newlines NEWLINE
-    opmode : OPMODE IDENT push_opmode newlines uses
-    module : MODULE IDENT push_module parameters newlines \
+    opmode : OPMODE make_opmode newlines uses
+    module : MODULE make_module parameters newlines \
              uses typedefs vartypes decls
     typedefs :
              | typedefs typedef
@@ -83,13 +83,15 @@ def p_none(p):
                   | kw_parameters keyword pos1_parameters
     uses :
          | uses use
-    fn_decl : FUNCTION IDENT make_fn parameters set_returning_opt newlines \
+    fn_decl : FUNCTION fn_name parameters set_returning_opt newlines \
               typedefs vartypes first_block labeled_blocks pop
-    sub_decl : SUBROUTINE IDENT make_sub parameters newlines \
+    sub_decl : SUBROUTINE sub_name parameters newlines \
                typedefs vartypes first_block labeled_blocks pop
     first_block :
     labeled_blocks :
     labeled_blocks : labeled_blocks labeled_block
+    labeled_block : LABEL labeled_block_name pos_parameters newlines \
+                    first_block
     returning_opt :
     taking_opt :
     '''
@@ -137,24 +139,24 @@ def p_all(p):
     arguments : pos_arguments kw_arguments
     kw_argument : KEYWORD pos1_arguments
     expr : QUOTE lvalue
-                | NOT expr
-                | expr '^' expr
-                | expr '*' expr
-                | expr '/' expr
-                | expr '%' expr
-                | expr '+' expr
-                | expr '-' expr
-                | '-' expr               %prec UMINUS
-                | expr '<' expr
-                | expr LEQ expr
-                | expr LAEQ expr
-                | expr '>' expr
-                | expr GEQ expr
-                | expr GAEQ expr
-                | expr EQ expr
-                | expr AEQ expr
-                | expr NEQ expr
-                | expr NAEQ expr
+         | NOT expr
+         | expr '^' expr
+         | expr '*' expr
+         | expr '/' expr
+         | expr '%' expr
+         | expr '+' expr
+         | expr '-' expr
+         | '-' expr               %prec UMINUS
+         | expr '<' expr
+         | expr LEQ expr
+         | expr LAEQ expr
+         | expr '>' expr
+         | expr GEQ expr
+         | expr GAEQ expr
+         | expr EQ expr
+         | expr AEQ expr
+         | expr NEQ expr
+         | expr NAEQ expr
     simple_statement : PASS
                      | lvalue arguments
                      | PREPARE lvalue arguments
@@ -179,7 +181,12 @@ def p_file(p):
     file : opmode
          | module
     '''
-    p[0] = Symtables[0]
+    p[0] = top_namespace()
+
+
+def p_block(p):
+    'block : statements1'
+    p[0] = Block(p[1])
 
 
 def p_expr(p):
@@ -189,47 +196,47 @@ def p_expr(p):
     p[0] = ('get', p[2], p[3])
 
 
-def p_pushopmode(p):
-    'push_opmode :'
-    push(Opmode(p[-1]))
+def p_make_opmode(p):
+    'make_opmode :'
+    Opmode()
 
 
-def p_pushmodule(p):
-    'push_module :'
-    push(Module(p[-1]))
+def p_make_module(p):
+    'make_module :'
+    Module()
 
 
 def p_parameter1(p):
     '''
     parameter : IDENT
     '''
-    current_entity().pos_parameter(p[1])
+    current_namespace().pos_parameter(p[1])
 
 
 def p_parameter2(p):
     '''
     parameter : IDENT '=' expr
     '''
-    current_entity().pos_parameter(p[1], p[3])
+    current_namespace().pos_parameter(p[1], p[3])
 
 
 def p_keyword(p):
     'keyword : KEYWORD'
-    current_entity().kw_parameter(p[1])
+    current_namespace().kw_parameter(p[1])
 
 
 def p_use1(p):
     '''
     use : USE IDENT arguments newlines
     '''
-    p[2].generator = Use(p[2], p[3])
+    Use(p[2], p[2], p[3])
 
 
 def p_use2(p):
     '''
     use : USE IDENT AS IDENT arguments newlines
     '''
-    p[2].generator = Use(p[4], p[5])
+    Use(p[2], p[4], p[5])
 
 
 def p_typedef(p):
@@ -237,75 +244,72 @@ def p_typedef(p):
     typedef : TYPE IDENT IS FUNCTION taking_opt returning_opt newlines
             | TYPE IDENT IS SUBROUTINE taking_opt newlines
     '''
-    p[1].generator = Typedef(*p[4:-1])
+    Typedef(p[2], *p[4:-1])
 
 
 def p_set_returning_opt(p):
     'set_returning_opt : returning_opt'
     if p[1] is not None:
-        current_entity().return_types = p[1]
-    p[0] = None
+        current_namespace().set_return_types(p[1])
 
 
 def p_vartype(p):
     '''
     vartype : IDENT IS IDENT newlines
     '''
-    p[1].type = p[3]
+    Variable(p[1], 'local', current_namespace().lookup(p[2]))
 
 
 def p_dim(p):
     '''
     vartype : DIM IDENT '[' expr ']' newlines
     '''
-    p[2].dim = p[4]
+    Variable(p[2], 'local', 'array of ' + p[2].type).dim = p[4]
 
 
-def p_make_fn(p):
-    'make_fn :'
-    lookup('global', generator=current_entity())
-    p[-1].generator = push(Function(p[-1]))
+def p_fn_name(p):
+    'fn_name : IDENT'
+    Function(p[1])
 
 
-def p_make_sub(p):
-    'make_sub :'
-    lookup('global', generator=current_entity())
-    p[-1].generator = push(Subroutine(p[-1]))
+def p_sub_name(p):
+    'sub_name : IDENT'
+    Subroutine(p[1])
 
 
 def p_first_block(p):
     'first_block : block'
-    current_entity().add_block(p[1])
+    current_namespace().add_first_block(p[1])
 
 
-def p_labeled_block(p):
-    'labeled_block : LABEL IDENT pos_parameters newlines block'
-    current_entity().labeled_block(p[2], p[3], p[5])
+def p_labeled_block_name(p):
+    'labeled_block_name : IDENT'
+    Labeled_block(p[1])
 
 
 def p_dlt(p):
     '''
     dlt : DLT_DELIMITER NEWLINE \
-          conditions \
+          dlt_conditions \
           DLT_DELIMITER NEWLINE \
-          actions \
+          dlt_actions \
           DLT_DELIMITER newlines
     '''
-    p[0] = ('dlt', p[2], p[4])
+    p[0] = DLT(p[3], p[6])
 
 
 def p_condition(p):
     '''
     condition : expr REST
     '''
-    p[0] = (p[1], p[2])
+    p[0] = p[1], p[2]
 
 
 def p_action1(p):
     '''
     action : simple_statement NEWLINE
     '''
-    p[0] = p[1], ''
+    p[0] = p[1], Token('', p[2].lexpos, p[2].lineno)
 
 
 def p_action2(p):
@@ -315,33 +319,43 @@ def p_action2(p):
     p[0] = p[1], p[2]
 
 
+def p_dlt_conditions(p):
+    'dlt_conditions : conditions'
+    p[0] = Conditions(p[1])
+
+
+def p_dlt_actions(p):
+    'dlt_actions : actions'
+    p[0] = Actions(p[1])
+
+
 def p_pop(p):
     'pop :'
-    pop()
-    p[0] = None
+    pop_namespace()
 
 
 def p_error(t):
-    syntax_error(t, "p_error: Syntax Error")
+    print("p_error", t)
+    syntax_error("p_error: Syntax Error", t.lexpos, t.lineno)
 
 
 parser = yacc.yacc()
 
 
 def parse(filename, debug=False):
-    lexer.filename = filename
-    with open(filename) as f:
-        lexer.input(f.read())
-    return parser.parse(debug=debug)
+    lex_file(filename)
+    ans = parser.parse(debug=debug)
+    check_for_errors()
+    assert ans is not None
+    return ans
 
 
 if __name__ == "__main__":
     import sys
 
     assert len(sys.argv) == 2
-    top_entity = parse(sys.argv[1],
-                       )
-                       #debug=True)
+    top_entity = parse(sys.argv[1], # debug=True,
+                      )
     print("top_entity", top_entity)
     top_entity.dump(sys.stdout)
 
