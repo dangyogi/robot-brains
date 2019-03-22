@@ -12,12 +12,16 @@ Num_errors = 0
 
 
 class Token:
-    def __init__(self, value, type=None, lexpos=None, lineno=None):
-        self.value = value
+    def __init__(self, lex_token, value=None, type=None, lexpos=None,
+                 lineno=None):
+        if value is None:
+            self.value = lex_token.value
+        else:
+            self.value = value
         self.type = type
-        self.lineno = lineno or lexer.lineno
+        self.lineno = lineno or lex_token.lineno
         if lexpos is None:
-            self.lexpos = lexer.lexpos
+            self.lexpos = lex_token.lexpos
         else:
             self.lexpos = lexpos
 
@@ -42,10 +46,12 @@ reserved = frozenset((
     'RETURN',
     'RETURNING',
     'REUSE',
+    'SET',
     'SUBROUTINE',
     'TAKING',
     'TO',
     'TYPE',
+    'UNPACK',
     'USE',
 
 ))
@@ -67,7 +73,6 @@ tokens = (
     'NEQ',
     'NEWLINE',
     'OPEQ',
-    'QUOTE',
     'REST',
     'RETURNING_TO',
     'STRING',
@@ -147,7 +152,7 @@ def t_NEWLINE(t):
         t.type = 'REST'
         last_rest = None
     else:
-        t.value = Token(t.value, lexpos=t.lexpos, lineno=t.lineno)
+        t.value = Token(t)
     return t
 
 
@@ -197,13 +202,13 @@ def t_KEYWORD(t):
     if t.value.lower() == 'returning_to:':
         t.type = 'RETURNING_TO'
     else:
-        t.value = Token(t.value)
+        t.value = Token(t)
     return t
 
 
 def t_STRING_IDENT(t):
     r'[a-zA-Z_][a-zA-Z_0-9]*\$'
-    t.value = Token(t.value, 'str')
+    t.value = Token(t, type='str')
     t.type = 'IDENT'
     return t
 
@@ -218,7 +223,7 @@ def t_BOOL_IDENT(t):
         t.value = False
         t.type = 'BOOL'
     else:
-        t.value = Token(name, 'bool')
+        t.value = Token(t, type='bool')
         t.type = 'IDENT'
     return t
 
@@ -229,7 +234,7 @@ def t_INT_IDENT(t):
     if upper in reserved:
         t.type = upper
     else:
-        t.value = Token(t.value, 'int')
+        t.value = Token(t, type='int')
         t.type = 'IDENT'
     return t
 
@@ -240,7 +245,7 @@ def t_FLOAT_IDENT(t):
     if upper in reserved:
         t.type = upper
     else:
-        t.value = Token(t.value, 'float')
+        t.value = Token(t, type='float')
         t.type = 'IDENT'
     return t
 
@@ -256,7 +261,7 @@ def t_REST(t):
     t.value = t.value[1:]
     if t.value.strip():
         if last_rest is None:
-            last_rest = Token(t.value, lexpos=t.lexpos + 1, lineno=t.lineno)
+            last_rest = Token(t, lexpos=t.lexpos + 1)
             #print("t_REST: got", t.lexpos,
             #      "setting last_rest to", last_rest)
         else:
@@ -264,6 +269,11 @@ def t_REST(t):
                          t.lexpos
                            + 1 + (len(t.value) - len(t.value.lstrip())),
                          t.lineno)
+
+
+def t_EQ(t):
+    r'=='
+    return t
 
 
 def t_GEQ(t):
@@ -286,11 +296,6 @@ def t_LAEQ(t):
     return t
 
 
-def t_EQ(t):
-    r'=='
-    return t
-
-
 def t_AEQ(t):
     r'~='
     return t
@@ -303,11 +308,6 @@ def t_NEQ(t):
 
 def t_NAEQ(t):
     r'!~=|<~>'
-    return t
-
-
-def t_QUOTE(t):
-    r"'"
     return t
 
 
@@ -388,15 +388,14 @@ def find_line(lexpos):
 def syntax_error(msg, lexpos, lineno, filename = None):
     global Num_errors
 
-    print(f'  File "{filename or lexer.filename}", '
-            f'line {lineno}',
+    print(f'File "{filename or lexer.filename}", line {lineno}',
           end='', file=sys.stderr)
     if Namespaces:
         print(f', in {Namespaces[-1]}', file=sys.stderr)
     else:
         print(file=sys.stderr)
-    print("   ", find_line(lexpos), file=sys.stderr)
-    print(" " * (2 + find_column(lexpos)), "^", file=sys.stderr)
+    print(" ", find_line(lexpos), file=sys.stderr)
+    print(" " * find_column(lexpos), "^", file=sys.stderr)
     print("SyntaxError:", msg)
 
     Num_errors += 1

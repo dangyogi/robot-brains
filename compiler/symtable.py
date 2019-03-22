@@ -23,38 +23,73 @@ def top_namespace():
 
 
 class Entity:
-    def __init__(self, ident):
-        self.name = ident.value
-        if scanner.Namespaces:
-            scanner.Namespaces[-1].set(ident, self)
+    def __init__(self, ident, no_prior_use=False):
+        self.name = ident
+        self.set_in_namespace(no_prior_use)
+
+    def set_in_namespace(self, no_prior_use):
+        current_namespace().set(self.name, self, no_prior_use)
 
     def dump(self, f, indent=0):
-        print(f"{indent_str(indent)}{self.__class__.__name__} {self.name}",
+        print(f"{indent_str(indent)}{self.__class__.__name__} "
+                f"{self.name.value}",
               end='', file=f)
         self.dump_details(f)
+        print(file=f)
 
     def dump_details(self, f):
-        print(file=f)
+        pass
+
+
+class Reference(Entity):
+    def __init__(self, ident, **kws):
+        Entity.__init__(self, ident)
+        for k, v in kws.items():
+            setattr(self, k, v)
 
 
 class Variable(Entity):
-    def __init__(self, ident, scope='global', type=None):
-        Entity.__init__(self, ident)
-        self.type = type or ident.type
-        self.scope = scope
+    assignment_seen = False
+
+    def __init__(self, ident, *, no_prior_use=False, **kws):
+        Entity.__init__(self, ident, no_prior_use)
+        self.type = ident.type
+        for k, v in kws.items():
+            setattr(self, k, v)
 
     def dump_details(self, f):
-        print(f"type={self.type} scope={self.scope}", file=f)
+        print(f" type={self.type}", end='', file=f)
+
+
+class Required_parameter(Variable):
+    def __init__(self, ident, **kws):
+        Variable.__init__(self, ident, **kws)
+        current_namespace().pos_parameter(self)
+
+    def dump_details(self, f):
+        super().dump_details(f)
+        if hasattr(self, 'param_pos_number'):
+            print(f" param_pos_number={self.param_pos_number}", end='', file=f)
+
+
+class Optional_parameter(Required_parameter):
+    def __init__(self, ident, default, **kws):
+        self.default = default
+        Required_parameter.__init__(self, ident, **kws)
+
+    def dump_details(self, f):
+        super().dump_details(f)
+        print(f" default={self.default}", end='', file=f)
 
 
 class Use(Entity):
-    def __init__(self, alias, module_name, arguments):
-        Entity.__init__(self, alias)
+    def __init__(self, ident, module_name, arguments):
+        Entity.__init__(self, ident)
         self.module_name = module_name
         self.arguments = arguments
 
     def dump_details(self, f):
-        print(f"module_name={self.module_name}", file=f)
+        print(f" module_name={self.module_name}", end='', file=f)
 
 
 class Typedef(Entity):
@@ -63,12 +98,153 @@ class Typedef(Entity):
         self.definition = definition
 
     def dump_details(self, f):
-        print(f"definition={self.definition}", file=f)
+        print(f" definition={self.definition}", end='', file=f)
+
+
+class With_parameters:
+    def __init__(self):
+        self.current_parameters = self.pos_parameters = []
+        self.kw_parameters = OrderedDict()
+        self.seen_default = False
+
+    def pos_parameter(self, param):
+        if isinstance(param, Required_parameter):
+            if self.seen_default:
+                scanner.syntax_error("Required parameter may not follow "
+                                     "default parameter",
+                                     ident.lexpos,
+                                     ident.lineno)
+        else:
+            self.seen_default = True
+        param.param_pos_number = len(self.current_parameters)
+        self.current_parameters.append(param)
+
+    def kw_parameter(self, keyword):
+        lname = keyword.value.lower()
+        if lname in self.kw_parameters:
+            scanner.syntax_error("Duplicate keyword",
+                                 keyword.lexpos, keyword.lineno)
+        self.current_parameters = self.kw_parameters[lname] = []
+        self.seen_default = False
+
+    def dump_details(self, f):
+        print(f" pos_params {self.pos_parameters} "
+                f"kw_params {self.kw_parameters.items()}",
+              end='',
+              file=f)
+
+
+class Labeled_block(Entity, With_parameters):
+    def __init__(self, ident):
+        Entity.__init__(self, ident)
+        With_parameters.__init__(self)
+
+    def add_first_block(self, block):
+        self.block = block
+
+
+class Namespace(Entity):
+    def __init__(self, ident):
+        Entity.__init__(self, ident)
+        self.names = OrderedDict()
+        #print(f"scanner.Namespaces.append({ident})")
+        scanner.Namespaces.append(self)
+
+    def __repr__(self):
+        return f"<{self.__class__.__name__} {self.name.value}>"
+
+    def lookup(self, ident, error_not_found=True):
+        lname = ident.value.lower()
+        if lname not in self.names:
+            if error_not_found:
+                syntax_error("Undefined name", ident.lexpos, ident.lineno)
+            return None
+        return self.names[lname]
+
+    def set(self, ident, entity, no_prior_use=False):
+        lname = ident.value.lower()
+        current_entity = self.names.get(lname)
+        if current_entity is not None and \
+           (no_prior_use or not isinstance(current_entity, Reference)):
+            scanner.syntax_error("Duplicate definition",
+                                 ident.lexpos, ident.lineno)
+        self.names[lname] = entity
+
+    def ident_ref(self, ident):
+        lname = ident.value.lower()
+        if lname not in self.names:
+            self.names[lname] = Reference(ident)
+        return self.names[lname]
+
+    def assigned_to(self, ident):
+        lname = ident.value.lower()
+        current_entity = self.names.get(lname)
+        if current_entity is None or isinstance(current_entity, Reference):
+            self.names[lname] = Variable(ident, assignment_seen=True)
+            return
+        if isinstance(current_entity, Variable):
+            current_entity.assignment_seen = True
+        else:
+            syntax_error(f"Can not set {current_entity.__class__.__name__}",
+                         ident.lexpos, indent.lineno)
+
+    def dump(self, f, indent=0):
+        super().dump(f, indent)
+        for entity in self.names.values():
+            entity.dump(f, indent + 2)
+
+
+class Dummy_token:
+    def __init__(self, value):
+        self.value = value
+
+    def __repr__(self):
+        return f"<Dummy_token {self.value!r}>"
+
+
+class Opmode(Namespace):
+    def __init__(self):
+        Namespace.__init__(self, Dummy_token(scanner.file_basename()))
+
+    def set_in_namespace(self, no_prior_use):
+        pass
+
+
+class Module(Opmode, With_parameters):
+    def __init__(self):
+        Opmode.__init__(self)
+        With_parameters.__init__(self)
+
+
+class Subroutine(Namespace, With_parameters):
+    def __init__(self, ident):
+        Namespace.__init__(self, ident)
+        With_parameters.__init__(self)
+
+    def add_first_block(self, first_block):
+        self.first_block = first_block
+
+
+class Function(Subroutine):
+    def __init__(self, ident):
+        Subroutine.__init__(self, ident)
+        self.return_type = ident.type
+
+    def set_return_types(self, return_types):
+        self.return_types = return_types
 
 
 class Block:
     def __init__(self, statements):
         self.statements = statements
+
+    def gen_code(self, f, indent=0):
+        prefix = indent_str(indent)
+        for s in self.statements:
+            if isinstance(s, DLT):
+                s.gen_code(f, indent)
+            else:
+                print(f"{prefix}{s};", file=f)
 
 
 class Conditions:
@@ -170,6 +346,15 @@ class Conditions:
                                  self.last_rest.lexpos + missing_columns[0],
                                  self.last_rest.lineno)
 
+    def gen_code(self, f, indent=0):
+        prefix = indent_str(indent)
+        print(f"{prefix}mask = 0", file=f)
+        def gen_bit(i, n):
+            print(f"{prefix}if ({n}) mask |= (2 << {i})", file=f)
+        for i, expr in enumerate(self.exprs):
+            gen_bit(len(self.exprs) - 1, expr)
+        print(f"{prefix}switch (mask)", "{", file=f)
+
 
 class Actions:
     r'''
@@ -234,6 +419,17 @@ class Actions:
         # Return missing column_numbers.
         return sorted(frozenset(range(num_columns)) - seen)
 
+    def gen_code(self, f, indent=0):
+        prefix = indent_str(indent)
+        for _, column_numbers, statements in self.blocks:
+            for i in column_numbers:
+                print(f"{prefix}case {i}:", file=f)
+            prefix = indent_str(indent + 4)
+            for s in statements:
+                print(f"{prefix}{s};", file=f)
+        print(prefix, end='', file=f)
+        print("}", file=f)
+
 
 class DLT:
     def __init__(self, conditions, actions):
@@ -241,105 +437,9 @@ class DLT:
         self.actions = actions
         conditions.sync_actions(actions)
 
-
-class With_parameters:
-    def __init__(self):
-        self.current_parameters = self.pos_parameters = []
-        self.kw_parameters = OrderedDict()
-        self.seen_default = False
-
-    def pos_parameter(self, ident, default=None):
-        if default is None and self.seen_default:
-            scanner.syntax_error("Required parameter may not follow "
-                                 "default parameter",
-                                 ident.lexpos,
-                                 ident.lineno)
-        self.current_parameters.append((ident, default))
-        if default is not None:
-            self.seen_default = True
-
-    def kw_parameter(self, keyword):
-        lname = keyword.value.lower()
-        if lname in self.kw_parameters:
-            scanner.syntax_error("Duplicate keyword",
-                                 keyword.lexpos, keyword.lineno)
-        self.current_parameters = self.kw_parameters[lname] = []
-        self.seen_default = False
-
-    def dump_details(self, f):
-        print(f"pos_params {self.pos_parameters} "
-                f"kw_params {self.kw_parameters.items()}",
-              file=f)
-
-
-class Labeled_block(Entity, With_parameters):
-    def __init__(self, ident):
-        Entity.__init__(self, ident)
-        With_parameters.__init__(self)
-
-    def add_first_block(self, block):
-        self.block = block
-
-
-class Namespace(Entity):
-    def __init__(self, ident):
-        Entity.__init__(self, ident)
-        self.names = OrderedDict()
-        #print(f"scanner.Namespaces.append({ident})")
-        scanner.Namespaces.append(self)
-
-    def __repr__(self):
-        return f"<{self.__class__.__name__} {self.name}>"
-
-    def set(self, ident, entity):
-        lname = ident.value.lower()
-        if lname in self.names:
-            scanner.syntax_error("Duplicate name", ident.lexpos, ident.lineno)
-        self.names[lname] = entity
-
-    def dump(self, f, indent=0):
-        super().dump(f, indent)
-        for entity in self.names.values():
-            entity.dump(f, indent + 2)
-
-
-class Dummy_token:
-    def __init__(self, value):
-        self.value = value
-
-    def __repr__(self):
-        return f"<Dummy_token {self.value!r}>"
-
-
-class Opmode(Namespace):
-    def __init__(self):
-        Namespace.__init__(self, Dummy_token(scanner.file_basename()))
-
-
-class Module(Opmode, With_parameters):
-    def __init__(self):
-        Opmode.__init__(self)
-        With_parameters.__init__(self)
-
-
-class Subroutine(Namespace, With_parameters):
-    def __init__(self, ident):
-        Namespace.__init__(self, ident)
-        With_parameters.__init__(self)
-
-    def add_first_block(self, first_block):
-        self.first_block = first_block
-
-
-class Function(Subroutine):
-    def __init__(self, ident):
-        Subroutine.__init__(self, ident)
-        self.return_type = ident.type
-
-    def set_return_types(self, return_types):
-        self.return_types = return_types
-
-
+    def gen_code(self, f, indent=0):
+        self.conditions.gen_code(f, indent)
+        self.actions.gen_code(f, indent)
 
 
 def indent_str(indent):
