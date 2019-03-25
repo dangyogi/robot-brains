@@ -171,6 +171,7 @@ def p_all(p):
                      | primary arguments RETURNING_TO expr
                      | REUSE expr RETURNING_TO expr
                      | GOTO primary pos_arguments
+                     | GOTO primary pos_arguments RETURNING_TO expr
                      | RETURN exprs
                      | RETURN exprs TO expr
     lvalue : primary '.' IDENT
