@@ -32,6 +32,7 @@ class Token:
 
 reserved = frozenset((
     'AS',
+    'AUTONOMOUS',
     'DIM',
     'FUNCTION',
     'GOTO',
@@ -49,11 +50,10 @@ reserved = frozenset((
     'SET',
     'SUBROUTINE',
     'TAKING',
-    'TO',
+    'TELEOP',
     'TYPE',
     'UNPACK',
     'USE',
-
 ))
 
 tokens = (
@@ -81,6 +81,9 @@ tokens = (
 
 
 scales = {
+    # The annotated number is multiplied by the number in this table to
+    # normalize it.
+
     # Lengths normalize to inches:
     'in': 1,
     'ft': 12,
@@ -101,22 +104,37 @@ scales = {
     'fpm': Fraction(12, 60),
     'mps': 1/0.0254,
     'mpm': 1/0.0254/60,
+    'mph': 1/0.0254/60,
+
+    # Accelerations normalize to in/sec^2
+    'gravity': 386.08858,
 
     # Forces normalize to lbs:
     'lb': 1,
     'lbs': 1,
     'oz': Fraction(1, 16),
-    'g': 1/453.59237,
-    'kg': 2.2046226,
+    'newton': 0.22480894,
+    'newtons': 0.22480894,
+    'n': 0.22480894,
+    'dyne': 2.2480894e-6,
+    'dynes': 2.2480894e-6,
 
     # Angles normalize to degrees:
     'deg': 1,
     'rad': 360/(2*math.pi),
     'rot': 360,
 
+    # Mass normalize to lbs
+    'g': 1/453.59237,
+    'grams': 1/453.59237,
+    'gram': 1/453.59237,
+    'kg': 2.2046226,
+    'kgram': 2.2046226,
+    'kgrams': 2.2046226,
+
     # Angular speed normalizes to degrees/sec:
     'rps': 360,
-    'rpm': 6, # 360/60
+    'rpm': 360//60,
 
     # Percent normalizes to 0-1
     '%': Fraction(1, 100),
@@ -159,7 +177,7 @@ def t_NEWLINE(t):
 def t_FLOAT(t):
     r'''(?P<num>[-+]?(\d+\.\d*([eE][-+]?\d+)?
               |\.\d+([eE][-+]?\d+)?
-              |\d+[eE][-+]?\d+))(?P<conv>[a-zA-Z%]+(^\d+)?(/[a-zA-Z]+(^\d+)?)*)?
+              |\d+[eE][-+]?\d+))(?P<conv>[a-zA-Z%]+(^\d+)?(/[a-zA-Z]+(^\d+)?)?)?
     '''
     conv = t.lexer.lexmatch.group('conv')
 
@@ -171,7 +189,7 @@ def t_FLOAT(t):
 
 
 def t_INTEGER(t):
-    r'(?P<num>[-+]?\d+)(?P<conv>[a-zA-Z%]+(^\d+)?(/[a-zA-Z]+(^\d+)?)*)?'
+    r'(?P<num>[-+]?\d+)(?P<conv>[a-zA-Z%]+(^\d+)?(/[a-zA-Z]+(^\d+)?)?)?'
     conv = t.lexer.lexmatch.group('conv')
 
     # This may result in an int, float or Fraction...

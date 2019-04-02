@@ -47,6 +47,8 @@ def p_first(p):
     pos_arguments : pos1_arguments
     exprs : exprs1
     exprs1 : expr
+    opmode_type : AUTONOMOUS
+                | TELEOP
     '''
     p[0] = p[1]
 
@@ -64,7 +66,7 @@ def p_none(p):
     '''
     newlines : NEWLINE
     newlines : newlines NEWLINE
-    opmode : OPMODE make_opmode newlines uses
+    opmode : opmode_type OPMODE make_opmode newlines uses
     module : MODULE make_module parameters newlines \
              uses typedefs vartypes decls
     typedefs :
@@ -173,7 +175,7 @@ def p_all(p):
                      | GOTO primary pos_arguments
                      | GOTO primary pos_arguments RETURNING_TO expr
                      | RETURN exprs
-                     | RETURN exprs TO expr
+                     | RETURN exprs kw_to expr
     lvalue : primary '.' IDENT
     lvalue : primary '[' expr ']'
     """

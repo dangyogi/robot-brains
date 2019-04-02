@@ -1,6 +1,6 @@
 comments:
     - # to end-of-line
-    - or "REM" to end-of-line?
+    - or "REM" to end-of-line? (NOT YET)
 
 line continuation:
     - -> as first non-whitespace on next line
@@ -14,38 +14,70 @@ identifiers:
     - booleans end with ?
     - integers start with i-n (I-N for globals)
     - else float
-    - arrays are dimensioned
+    - arrays are explicitly dimensioned, taking the element type from the type
+      of the array identifier
+
+reserved words:
+    - AS
+    - AUTONOMOUS
+    - DIM
+    - FUNCTION
+    - GOTO
+    - IS
+    - LABEL
+    - MODULE
+    - NOT
+    - OPMODE
+    - PASS
+    - PREPARE
+    - RELEASE
+    - RETURN
+    - RETURNING
+    - REUSE
+    - SET
+    - SUBROUTINE
+    - TAKING
+    - TELEOP
+    - TYPE
+    - UNPACK
+    - USE
 
 literals:
     - strings:
         - string literals use double quotes, all on one line
-        - embedded double quotes must be doubled
+        - embedded double quotes must be doubled (e.g., "He said, ""Hello!""")
         - no other escaping is provided (e.g., no \ escapes like \n)
         - no string literal concatenation
         - no embedded variable substitutions (as part of the literal)
     - integers:
-        - [digit]+
+        - [-+]?[digit]+
         - no support for different bases
     - floats:
         - standard float literal formats
-        - fractional
+        - fractional (NOT YET)
             - digit*.digit+/digit+
     - units (follow literal):
         - all units are part of the literal representation and are converted
           to a common base unit so that the resulting literal value no longer
           has a unit associated with it
+          - units must follow the literal with no intervening spaces
+          - units may be followed by an exponent, e.g., ft^2
+          - units may include one divisor, e.g., ft/sec^2
+          - compound units are not yet supported, e.g., ft*lbs
         - lengths (in, mm, cm, m, ft)
             - converted to inches
-        - time (sec, msec, usec, nsec, min)
+        - time (sec, msec, usec, min)
             - converted to seconds
-        - angles (degrees, radians, rotations)
+        - angles (deg, rad, rot)
             - converted to degrees
-        - force (oz, lbs, newtons (N), dynes (dyn))
+        - force (oz, lb(s), lb, g, kg, newton(s) (N), dyne(s))
             - converted to lbs
-        - mass (oz, lbs, grams, kgrams)
+        - mass (oz, lb(s), gram(s) (g), kgram(s) (kg))
             - converted to lbs
-        - acceleration
-            - g
+        - speed (ips, ipm, fps, fpm, mps, mpm, mph)
+            - converted to in/sec
+        - acceleration (gravity)
+            - converted to in/sec^2
         - percent (%)
             - divided by 100
 

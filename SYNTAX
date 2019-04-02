@@ -1,171 +1,121 @@
-op_mode:
-    name opmode 'use'
-    -> ([name 'as'] module <exp>* (keyword_name ':' <exp>+)* NEWLINE)+
+operator precedence (highest to lowest)
+    '.' (left)
+    '^' (right)
+    unary '-' (right)
+    '*' '%' (left)
+    '/' (right)
+    '+' '-' (left)
+    '<' '<=' '<~=' '>' '>=' '>~=' '~=' '!~=' '<~>' (nonassoc)
+    '==' '!=' '<>' (nonassoc)
+    NOT (nonassoc)
 
 
-module/function/subroutine declaration
-    name ('module' | 'function' | 'subroutine')
-        - function name follows identifier typing rules to specify the return
-          type of the function
-        - modules/subroutines have no return type
-        - all param_names (but not keyword_names) follow identifier typing rules
-    -> param_name*
-        - required positional parameters
-    -> (param_name ['=' <exp>])*
-        - optional positional parameters
-        ? do we really want these???
-            - no (for now)
-    -> ([keyword_name ':'] param_name ['=' <exp>])*
-        - the keyword_names are required in the call
-        - keyword_names in the call may be in a different order
-        - keyword_names lacking a default value are required
-        - default and non-default keywords may be declared in any order
+source_file: opmode | module
 
 
-function/subroutine declarations are followed by:
-    ['returning' type_name+]
-    -> type_declaration*
-    -> (name 'is' type_name)*
-    -> ('dim' name '[' <exp> ']')*  # name may have been typed by name is type
-    -> block
-    -> labeled_block*
+opmode: (AUTONOMOUS | TELEOP) OPMODE NEWLINES
+        {use}
 
 
-type_declaration:
-    - 'type' type_name 'is' 'function' ['taking' type_name+]
-    -> 'returning' type_name+
-    - 'type' type_name 'is' 'subroutine' ['taking' type_name+]
+module: MODULE parameters NEWLINES
+        {use}
+        {typedef}
+        {vartype}
+        {fn_decl | sub_decl}
 
 
-module declarations are followed by:
-    type_declaration*
-    variable decls
-    function/subroutine declarations
+use: USE IDENT [AS IDENT] arguments NEWLINES
 
 
-module/function/subroutine call:
-    - function calls with arguments are not simple_exp, ( ) required for nested
-      calls within arguments:
-        - foo 11 (bar 22)
-        - but if bar takes no arguments:
-            - foo 11 bar
-    - name <simple_exp>* (keyword_name ':' <simple_exp>)*
+typedef: TYPE IDENT IS FUNCTION [TAKING 1{IDENT,}] [RETURNING 1{IDENT,}]
+           NEWLINES
+       | TYPE IDENT IS SUBROUTINE [TAKING 1{IDENT,}] NEWLINES
 
 
-simple_exp:
-    - literal
-    - variable (local or global)
-        - calls result if it's a function of no arguments, use 'foo to quote
-    - label
-        - does _not_ call result
-    - '\'' ( function | label )
-        - does _not_ call result if it's a function of no arguments
-    - '-'<simple_exp>
-    - 'not' <simple_exp>
-    - <simple_exp> '[' <exp> ']'
-    - <simple_exp> '.' <identifier>
-    - '(' <exp> ')'
+vartype: IDENT IS IDENT NEWLINESS
+       | DIM IDENT '[' expr ']' NEWLINES
 
 
-exp (in descending precedence order, left to right unless stated otherwise):
-    - <simple_exp>
-    - <simple_exp> <simple_exp>+
-    - <exp> '^' <exp> (right to left)
-    - <exp> '*' <exp>
-    - <exp> '/' <exp> (right to left)
-    - same precedence:
-        - <exp> '+' <exp>
-        - <exp> '-' <exp>
-    - same precedence (overlapping):
-        - <exp> '<' <exp>
-        - <exp> '<=' <exp>
-        - <exp> '<~=' <exp>
-        - <exp> '>' <exp>
-        - <exp> '>=' <exp>
-        - <exp> '>~=' <exp>
-    - same precedence (overlapping):
-        - <exp> '==' <exp>
-        - <exp> '~=' <exp>
-        - <exp> '!=' <exp>
-        - <exp> '<>' <exp>
-        - <exp> '!~=' <exp>
-        - <exp> '<~>' <exp>
+fn_decl: FUNCTION IDENT parameters
+         {typedef}
+         {vartype}
+         {statement}
+         {labeled_block}
 
 
-simple_statement:
-    - <simple_exp>+
-        - verifies that prepared and called in-use flags are both false.
-        - sets called flag
-    - 'prepare' <simple_exp>+
-        - checks and sets prepared flag.
-    - 'reuse' <simple_exp>
-        - verifies prepared flag is set.
-            - can not be used on un-prepared parameterless subroutines.
-        - verifies called flag is not set.
-        - sets called flag.
-    - 'release' <simple_exp>
-        - checks and resets prepared flag.
-    - variable '=' <exp>
-    - variable+ '=' <simple_exp>+
-        - calling return^ in called function sends return addr as first value.
-            - the return addr is type foo^
-            - all arguments to return^ come after the return addr.
-    - variable '<op>=' <exp>
-        - e.g.
-            - i += 1
+seb_decl: SUBROUTINE IDENT parameters
+          {typedef}
+          {vartype}
+          {statement}
+          {labeled_block}
 
 
-final_simple_statement:
-    - <simple_statement>
-    - call 'returning_to:' <simple_exp>
-    - 'reuse' <simple_exp> 'returning_to:' <simple_exp>
-    - goto <simple_exp> <simple_exp>*
-    - return <simple_exp>* ['to' <simple_exp>]
-        - checks and resets called flag
+labeled_block: LABEL IDENT {parameter,} NEWLINES
+               {statement}
 
 
-statement:
-    - <simple_statement> NEWLINE
-    - <dlt>
+parameters: {parameter,} {KEYWORD 1{parameter,}}
 
 
-final_statement:
-    - <final_simple_statement> NEWLINE
-    - <final_dlt>
+parameter: IDENT ['=' expr]
 
 
-block:
-    - <statement>* <final_statement>
+statement: simple_statement NEWLINES
+         | dlt
 
 
-labeled_block:
-    <label> param_name* ':' <block>
+simple_statement: PASS
+                | primary arguments [RETURNING_TO: expr]
+                | PREPARE primary arguments
+                | REUSE expr [RETURNING_TO: expr]
+                | RELEASE primary
+                | SET lvalue TO: expr
+                | UNPACK 2{lvalue,} FROM: expr
+                | primary ('+='|'-='|'*='|'/='|'%='|'^=') expr
+                | GOTO primary {expr,} [RETURNING_TO: expr]
+                | RETURN {expr,} [TO: expr]
 
 
-dlt:
-    DIVIDER NEWLINE
-    (<exp> '|' ('y'|'Y'|'n'|'N'|'-')+ NEWLINE)*
-    DIVIDER NEWLINE
-    <action>+
-    DIVIDER NEWLINE
+dlt: '====' NEWLINE
+     1{expr '|' {'Y'|'N'|'-'} NEWLINE}
+     '====' NEWLINE
+     1{simple_statement ['|' {'X'|' '}] NEWLINE}
+     '====' NEWLINE
 
 
-final_dlt:
-    DIVIDER NEWLINE
-    (<exp> '|' ('y'|'Y'|'n'|'N'|'-')+ NEWLINE)*
-    DIVIDER NEWLINE
-    <final_action>+
-    DIVIDER NEWLINE
+lvalue: IDENT
+      | primary '.' IDENT
+      | primary '[' expr ']'
 
 
-action:
-    <simple_statement> '|' ('x'|'X'|' ')+ NEWLINE
-    (<simple_statement> NEWLINE)*
+expr: primary
+    | NOT expr
+    | '-' expr
+    | expr '^' expr
+    | expr '*' expr
+    | expr '/' expr
+    | expr '%' expr
+    | expr '+' expr
+    | expr '-' expr
+    | expr '<' expr
+    | expr '<=' expr
+    | expr '<~=' expr
+    | expr '>' expr
+    | expr '>=' expr
+    | expr '>~=' expr
+    | expr '==' expr
+    | expr '!=' expr
+    | expr '<>' expr
+    | expr '!~=' expr
+    | expr '<~>' expr
 
 
-final_action:
-    - <final_simple_statement> '|' ('x'|'X'|' ')+ NEWLINE
-    - <simple_statement> '|' ('x'|'X'|' ')+ NEWLINE
-      (<simple_statement> NEWLINE)*
-      <final_simple_statement> NEWLINE
+primary: STRING | FLOAT | INTEGER | BOOL | IDENT
+       | '(' expr ')'
+       | primary '.' IDENT
+       | primary '[' expr ']'
+       | '{' primary arguments '}'
+
+
+arguments: {expr,} {KEYWORD 1{expr,}}
 
