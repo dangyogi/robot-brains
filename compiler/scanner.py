@@ -85,56 +85,56 @@ scales = {
     # normalize it.
 
     # Lengths normalize to inches:
-    'in': 1,
-    'ft': 12,
-    'm': 1/0.0254,
-    'cm': 1/2.54,
-    'mm': 1/25.4,
+    'IN': 1,
+    'FT': 12,
+    'M': 1/0.0254,
+    'CM': 1/2.54,
+    'MM': 1/25.4,
 
     # Time normalizes to seconds:
-    'min': 60,
-    'sec': 1,
-    'msec': Fraction(1, 10**3),
-    'usec': Fraction(1, 10**6),
+    'MIN': 60,
+    'SEC': 1,
+    'MSEC': Fraction(1, 10**3),
+    'USEC': Fraction(1, 10**6),
 
     # Speeds normalize to in/sec:
-    'ips': 1,
-    'ipm': Fraction(1, 60),
-    'fps': 12,
-    'fpm': Fraction(12, 60),
-    'mps': 1/0.0254,
-    'mpm': 1/0.0254/60,
-    'mph': 1/0.0254/60,
+    'IPS': 1,
+    'IPM': Fraction(1, 60),
+    'FPS': 12,
+    'FPM': Fraction(12, 60),
+    'MPS': 1/0.0254,
+    'MPM': 1/0.0254/60,
+    'MPH': 1/0.0254/60,
 
     # Accelerations normalize to in/sec^2
-    'gravity': 386.08858,
+    'GRAVITY': 386.08858,
 
     # Forces normalize to lbs:
-    'lb': 1,
-    'lbs': 1,
-    'oz': Fraction(1, 16),
-    'newton': 0.22480894,
-    'newtons': 0.22480894,
-    'n': 0.22480894,
-    'dyne': 2.2480894e-6,
-    'dynes': 2.2480894e-6,
+    'LB': 1,
+    'LBS': 1,
+    'OZ': Fraction(1, 16),
+    'NEWTON': 0.22480894,
+    'NEWTONS': 0.22480894,
+    'N': 0.22480894,
+    'DYNE': 2.2480894e-6,
+    'DYNES': 2.2480894e-6,
 
     # Angles normalize to degrees:
-    'deg': 1,
-    'rad': 360/(2*math.pi),
-    'rot': 360,
+    'DEG': 1,
+    'RAD': 360/(2*math.pi),
+    'ROT': 360,
 
     # Mass normalize to lbs
-    'g': 1/453.59237,
-    'grams': 1/453.59237,
-    'gram': 1/453.59237,
-    'kg': 2.2046226,
-    'kgram': 2.2046226,
-    'kgrams': 2.2046226,
+    'G': 1/453.59237,
+    'GRAMS': 1/453.59237,
+    'GRAM': 1/453.59237,
+    'KG': 2.2046226,
+    'KGRAM': 2.2046226,
+    'KGRAMS': 2.2046226,
 
     # Angular speed normalizes to degrees/sec:
-    'rps': 360,
-    'rpm': 360//60,
+    'RPS': 360,
+    'RPM': 360//60,
 
     # Percent normalizes to 0-1
     '%': Fraction(1, 100),
@@ -251,6 +251,13 @@ def t_INT_IDENT(t):
     upper = t.value.upper()
     if upper in reserved:
         t.type = upper
+    elif upper in scales:
+        t.value = scales[upper]
+        if isinstance(t.value, int):
+            t.type = 'INTEGER'
+        else:
+            t.value = float(t.value)
+            t.type = 'FLOAT'
     else:
         t.value = Token(t, type='int')
         t.type = 'IDENT'
@@ -262,6 +269,16 @@ def t_FLOAT_IDENT(t):
     upper = t.value.upper()
     if upper in reserved:
         t.type = upper
+    elif upper in scales:
+        t.value = scales[upper]
+        if isinstance(t.value, int):
+            t.type = 'INTEGER'
+        else:
+            t.value = float(t.value)
+            t.type = 'FLOAT'
+    elif upper == 'PI':
+        t.value = math.pi
+        t.type = 'FLOAT'
     else:
         t.value = Token(t, type='float')
         t.type = 'IDENT'
@@ -359,9 +376,10 @@ def convert_segment(seg, lexpos, lineno):
         syntax_error("Multiple exponents in unit conversion not allowed",
                      lexpos + len(terms[0]) + len(terms[1]) + 1,
                      lineno)
-    if terms[0] not in scales:
+    upper = terms[0].upper()
+    if upper not in scales:
         syntax_error(f"Unknown conversion unit", lexpos, lineno)
-    ans = scales[terms[0]]
+    ans = scales[upper]
     if len(terms) == 2:
         try:
             ans **= int(terms[1])

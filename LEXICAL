@@ -80,4 +80,12 @@ literals:
             - converted to in/sec^2
         - percent (%)
             - divided by 100
+        - all units are also reserved words representing literals (in addition
+          to "pi")
+            - this allows "x/rad" to convert the common base unit (degrees)
+              into radians
+              - because of the operator precedence, this also works for
+                "x/ft/sec^2" to convert x from common base units (in/sec^2) to
+                ft/sec^2.  This works because x/ft/sec^2 is parsed as
+                x/(ft/sec^2).
 
