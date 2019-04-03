@@ -1,4 +1,4 @@
-module autonomous
+module
 
 use drive_train
 
@@ -12,7 +12,7 @@ subroutine start
     delay 2
     latch_servo.set_min
 
-    drive = drive_train.skid_drive
+    set drive to: drive_train.skid_drive
     drive.move 50in
 
     spinner_motor.set_power 20%

@@ -266,7 +266,7 @@ def p_use2(p):
     '''
     use : USE ident_ref AS IDENT arguments newlines
     '''
-    Use(p[2], p[4], p[5])
+    Use(p[4], p[2], p[5])
 
 
 def p_typedef(p):
