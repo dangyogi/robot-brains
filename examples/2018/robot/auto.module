@@ -2,9 +2,9 @@ module
 
 use drive_train
 
-use latch_servo min: 0 max: 60deg
+#use latch_servo min: 0 max: 60deg
 
-use spinner_motor
+#use spinner_motor
 
 
 subroutine start

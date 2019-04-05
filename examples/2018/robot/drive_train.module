@@ -1,7 +1,7 @@
 module
 
-use left_motor
-use right_motor
+#use left_motor
+#use right_motor
 
 use skid_drive left_motor: left_motor right_motor: right_motor
 

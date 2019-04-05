@@ -6,6 +6,7 @@ import scanner
 
 
 def push_namespace(ns):
+    # No longer used...
     scanner.Namespaces.append(ns)
     return entity
 
@@ -22,7 +23,25 @@ def top_namespace():
     return scanner.Namespaces[0]
 
 
-class Entity:
+class Symtable:
+    r'''Root of all symtable classes.
+    '''
+    def dump(self, f, indent=0):
+        print(f"{indent_str(indent)}{self.__class__.__name__} ", end='', file=f)
+        self.dump_details(f)
+        print(file=f)
+        self.dump_contents(f, indent + 2)
+
+    def dump_details(self, f):
+        pass
+
+    def dump_contents(self, f, indent):
+        pass
+
+
+class Entity(Symtable):
+    r'''Named entities within the current namespace.
+    '''
     def __init__(self, ident, no_prior_use=False):
         self.name = ident
         self.set_in_namespace(no_prior_use)
@@ -30,14 +49,28 @@ class Entity:
     def set_in_namespace(self, no_prior_use):
         current_namespace().set(self.name, self, no_prior_use)
 
-    def dump(self, f, indent=0):
-        print(f"{indent_str(indent)}{self.__class__.__name__} "
-                f"{self.name.value}",
-              end='', file=f)
-        self.dump_details(f)
-        print(file=f)
-
     def dump_details(self, f):
+        super().dump_details(f)
+        print(f" {self.name.value}", end='', file=f)
+
+    def gen_prep(self, generator):
+        #print(f"{self.name.value}.gen_prep")
+        self.gen_name = self.name.value
+
+    def gen_structs(self, generator):
+        #print(f"{self.name.value}.gen_structs -- ignored")
+        pass
+
+    def gen_struct_entries(self, generator):
+        #print(f"{self.name.value}.gen_struct_entries -- ignored")
+        pass
+
+    def gen_struct_entry(self, generator):
+        #print(f"{self.name.value}.gen_struct_entry -- ignored")
+        pass
+
+    def gen_code(self, generator):
+        print(f"{self.name.value}.gen_structs -- ignored")
         pass
 
 
@@ -50,6 +83,7 @@ class Reference(Entity):
 
 class Variable(Entity):
     assignment_seen = False
+    dim = None
 
     def __init__(self, ident, *, no_prior_use=False, **kws):
         Entity.__init__(self, ident, no_prior_use)
@@ -58,10 +92,18 @@ class Variable(Entity):
             setattr(self, k, v)
 
     def dump_details(self, f):
+        super().dump_details(f)
         print(f" type={self.type}", end='', file=f)
+
+    def gen_struct_entry(self, generator):
+        #print(self.name.value, "gen_struct_entry", self.assignment_seen)
+        if self.assignment_seen:
+            generator.emit_struct_variable(self.type, self.name.value, self.dim)
 
 
 class Required_parameter(Variable):
+    assignment_seen = True
+
     def __init__(self, ident, **kws):
         Variable.__init__(self, ident, **kws)
         current_namespace().pos_parameter(self)
@@ -89,6 +131,7 @@ class Use(Entity):
         self.arguments = arguments
 
     def dump_details(self, f):
+        super().dump_details(f)
         print(f" module_name={self.module_name}", end='', file=f)
 
 
@@ -98,6 +141,7 @@ class Typedef(Entity):
         self.definition = definition
 
     def dump_details(self, f):
+        super().dump_details(f)
         print(f" definition={self.definition}", end='', file=f)
 
 
@@ -128,19 +172,31 @@ class With_parameters:
         self.seen_default = False
 
     def dump_details(self, f):
-        print(f" pos_params {self.pos_parameters} "
-                f"kw_params {self.kw_parameters.items()}",
+        super().dump_details(f)
+        print(f" pos_params {self.pos_parameters}"
+                f" kw_params {self.kw_parameters.items()}",
               end='',
               file=f)
 
 
 class Labeled_block(Entity, With_parameters):
     def __init__(self, ident):
+        self.parent_namespace = current_namespace()
         Entity.__init__(self, ident)
         With_parameters.__init__(self)
+        current_namespace().push_labeled_block(self)
+        self.code_name = f"{self.parent_namespace.code_name}__{self.name.value}"
 
     def add_first_block(self, block):
         self.block = block
+
+    def dump_details(self, f):
+        super().dump_details(f)
+        print(f" block {self.block}", end='', file=f)
+
+    def gen_code(self, generator):
+        generator.emit_label(self.code_name)
+        self.block.gen_code(generator)
 
 
 class Namespace(Entity):
@@ -149,6 +205,7 @@ class Namespace(Entity):
         self.names = OrderedDict()
         #print(f"scanner.Namespaces.append({ident})")
         scanner.Namespaces.append(self)
+        self.code_name = self.name.value
 
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.name.value}>"
@@ -188,10 +245,28 @@ class Namespace(Entity):
             syntax_error(f"Can not set {current_entity.__class__.__name__}",
                          ident.lexpos, indent.lineno)
 
-    def dump(self, f, indent=0):
-        super().dump(f, indent)
+    def dump_contents(self, f, indent):
         for entity in self.names.values():
-            entity.dump(f, indent + 2)
+            entity.dump(f, indent)
+
+    def gen_prep(self, generator):
+        for entity in self.names.values():
+            entity.gen_prep(generator)
+
+    def gen_structs(self, generator):
+        #print("Namespace", self.name.value, "gen_structs")
+        for entity in self.names.values():
+            entity.gen_structs(generator)
+
+    def gen_struct_entries(self, generator):
+        #print("Namespace", self.name.value, "gen_struct_entries")
+        for entity in self.names.values():
+            entity.gen_struct_entry(generator)
+
+    def gen_code(self, generator):
+        print("Namespace", self.name.value, "gen_code")
+        for entity in self.names.values():
+            entity.gen_code(generator)
 
 
 class Dummy_token:
@@ -203,51 +278,195 @@ class Dummy_token:
 
 
 class Opmode(Namespace):
-    def __init__(self):
+    def __init__(self, modules_seen=None):
         Namespace.__init__(self, Dummy_token(scanner.file_basename()))
+        if modules_seen is not None:
+            self.modules_seen = modules_seen
 
     def set_in_namespace(self, no_prior_use):
         pass
+
+    def gen_program(self, generator):
+        self.gen_prep(generator)
+        self.gen_structs(generator)
+        generator.start_code()
+        self.gen_code(generator)
+        generator.end_code()
 
 
 class Module(Opmode, With_parameters):
     def __init__(self):
         Opmode.__init__(self)
         With_parameters.__init__(self)
+        self.struct_name = self.name.value + "_module"
+
+    def gen_structs(self, generator):
+        super().gen_structs(generator)
+        self.type_name = generator.emit_struct_start(self.struct_name)
+        self.gen_struct_entries(generator)
+        generator.emit_struct_end()
 
 
 class Subroutine(Namespace, With_parameters):
+    struct_name_suffix = "_sub"
+
     def __init__(self, ident):
+        self.parent_namespace = current_namespace()
         Namespace.__init__(self, ident)
         With_parameters.__init__(self)
+        self.current_block = None
+        self.code_name = f"{self.parent_namespace.code_name}__{self.name.value}"
+        self.struct_name = self.code_name + self.struct_name_suffix
+        self.vars_name = self.name.value + "_vars"
 
     def add_first_block(self, first_block):
-        self.first_block = first_block
+        if self.current_block is None:
+            self.first_block = first_block
+        else:
+            self.current_block.add_first_block(first_block)
+
+    def push_labeled_block(self, labeled_block):
+        self.current_block = labeled_block
+
+    def dump_contents(self, f, indent):
+        super().dump_contents(f, indent)
+        self.first_block.dump(f, indent)
+
+    #def gen_prep(self, generator):
+    #    self.gen_name = self.name.value
+
+    def gen_structs(self, generator):
+        self.type_name = generator.emit_struct_start(self.struct_name)
+        self.gen_ret_entry(generator)
+        self.gen_struct_entries(generator)
+        generator.emit_struct_end()
+
+    def gen_ret_entry(self, generator):
+        generator.emit_struct_sub_ret_info()
+
+    def gen_struct_entry(self, generator):
+        generator._emit_struct_variable(self.type_name, self.vars_name)
+
+    def gen_code(self, generator):
+        pass
 
 
 class Function(Subroutine):
+    struct_name_suffix = "_fn"
+
     def __init__(self, ident):
         Subroutine.__init__(self, ident)
-        self.return_type = ident.type
+        self.return_types = ident.type,
 
     def set_return_types(self, return_types):
         self.return_types = return_types
 
+    def dump_details(self, f):
+        super().dump_details(f)
+        print(f" return_types {self.return_types}", end='', file=f)
 
-class Block:
+    def gen_ret_entry(self, generator):
+        generator.emit_struct_fn_ret_info()
+
+
+class Block(Symtable):
     def __init__(self, statements):
         self.statements = statements
 
-    def gen_code(self, f, indent=0):
-        prefix = indent_str(indent)
+    def dump_contents(self, f, indent):
         for s in self.statements:
-            if isinstance(s, DLT):
-                s.gen_code(f, indent)
-            else:
-                print(f"{prefix}{s};", file=f)
+            s.dump(f, indent)
+
+    def gen_code(self, f, indent=0):
+        for s in self.statements:
+            s.gen_code(f, indent)
 
 
-class Conditions:
+class Statement(Symtable):
+    arguments = {
+        'pass': (),
+        'prepare': ('expr', (('*', 'expr'), ('*', ('token', ('*', 'expr'))))),
+        'reuse': ('expr', 'ignore', 'expr'),
+        'release': ('expr'),
+        'set': ('lvalue', 'ignore', 'expr'),
+        'unpack': (('*', 'lvalue'), 'ignore', 'expr'),
+        'goto': ('expr', ('*', 'expr'), 'ignore', 'expr'),
+        'return': (('*', 'expr'), 'ignore', 'expr'),
+    }
+
+    formats = {
+        'pass': (),
+        'prepare': ('prepare {}',),
+        'reuse': ('reuse {}',),
+        'release': ('release {}',),
+        'set': ('{0[0]} = {0[2]}',),
+        'unpack': ('unpack {}',),
+        'goto': ('goto {}',),
+        'return': ('return {}',),
+    }
+
+    def __init__(self, *args):
+        self.args = args
+
+    def dump_details(self, f):
+        super().dump_details(f)
+        print(f" {self.args}", end='', file=f)
+
+    def gen_code(self, generator, indent):
+        generator.reset_temps()
+
+        statements = []
+        def process_expr(arg):
+            pre_statements, C_expr, _, _ = generator.gen_expr(arg)
+            statements.extend(pre_statements)
+            return C_expr
+
+        def process_lvalue(arg):
+            pre_statements, C_lvalue, _, _ = generator.gen_lvalue(arg)
+            statements.extend(pre_statements)
+            return C_lvalue
+
+        statement_type = self.args[0].lower()
+
+        processed_args = self.follow(self.args,
+                                     self.arguments[statement_type],
+                                     process_expr,
+                                     process_lvalue)
+
+        statements.extend(format.format(processed_args)
+                          for format in self.formats[statement_type])
+        generator.emit_statements(statements, indent)
+
+    def follow(self, args, arg_map, expr_fn, lvalue_fn):
+        if arg_map == 'expr':
+            return expr_fn(args)
+        if arg_map == 'lvalue':
+            return lvalue_fn(args)
+        if arg_map == 'ignore':
+            return args
+        assert isinstance(arg_map, tuple)
+        assert isinstance(args, tuple)
+        if arg_map[0] == '*':
+            assert len(arg_map) == 2, \
+                   f"expected len(arg_map) == 2 for {arg_map}"
+            return tuple(self.follow(arg, arg_map[1], expr_fn, lvalue_fn)
+                         for arg in args)
+        assert len(args) <= len(arg_map)
+        return tuple(self.follow(arg, map, expr_fn, lvalue_fn)
+                     for arg, map in zip(args, arg_map))
+
+
+class Call_statement(Statement):
+    # primary arguments [RETURNING_TO expr]
+    pass
+
+
+class Opeq_statement(Statement):
+    # primary OPEQ expr
+    pass
+
+
+class Conditions(Symtable):
     r'''DLT conditions section.
 
     self.exprs is condition expressions in order from MSB to LSB in the mask.
@@ -348,15 +567,15 @@ class Conditions:
 
     def gen_code(self, f, indent=0):
         prefix = indent_str(indent)
-        print(f"{prefix}mask = 0", file=f)
+        print(f"{prefix}dlt_mask = 0", file=f)
         def gen_bit(i, n):
-            print(f"{prefix}if ({n}) mask |= (2 << {i})", file=f)
+            print(f"{prefix}if ({n}) dlt_mask |= (2 << {i})", file=f)
         for i, expr in enumerate(self.exprs):
             gen_bit(len(self.exprs) - 1, expr)
-        print(f"{prefix}switch (mask)", "{", file=f)
+        print(f"{prefix}switch (dlt_mask)", "{", file=f)
 
 
-class Actions:
+class Actions(Symtable):
     r'''
     self.blocks is [(rest, [column_number], [statement])]
     '''
@@ -431,7 +650,7 @@ class Actions:
         print("}", file=f)
 
 
-class DLT:
+class DLT(Symtable):
     def __init__(self, conditions, actions):
         self.conditions = conditions
         self.actions = actions

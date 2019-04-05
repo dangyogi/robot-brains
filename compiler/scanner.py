@@ -13,7 +13,7 @@ Num_errors = 0
 
 class Token:
     def __init__(self, lex_token, value=None, type=None, lexpos=None,
-                 lineno=None):
+                 lineno=None, filename=None, namespace=None):
         if value is None:
             self.value = lex_token.value
         else:
@@ -24,10 +24,19 @@ class Token:
             self.lexpos = lex_token.lexpos
         else:
             self.lexpos = lexpos
+        if filename is None:
+            self.filename = lexer.filename
+        else:
+            self.filename = filename
+        if namespace is None and Namespaces:
+            self.namespace = Namespaces[-1]
+        else:
+            self.namespace = namespace
 
     def __repr__(self):
-        return f"<Token {self.value!r} lineno={self.lineno} " \
-               f"lexpos={self.lexpos}>"
+        return (f"<Token {self.value!r}"
+                #f" lineno={self.lineno} lexpos={self.lexpos}"
+                ">")
 
 
 reserved = frozenset((
@@ -390,48 +399,57 @@ def convert_segment(seg, lexpos, lineno):
     return ans
 
 
-def find_line_start(lexpos):
+def find_line_start(lexpos, lexdata=None):
     r'''Return the index of the first character of the line.
     '''
-    return lexer.lexdata.rfind('\n', 0, lexpos) + 1
+    return (lexdata or lexer.lexdata).rfind('\n', 0, lexpos) + 1
 
 
-def find_line_end(lexpos):
+def find_line_end(lexpos, lexdata=None):
     r'''Return the index of the last (non-newline) character of the line.
 
     Return is < 0 if this is the last line and it doesn't have a newline
     at the end.
     '''
-    return lexer.lexdata.find('\n', lexpos) - 1
+    return (lexdata or lexer.lexdata).find('\n', lexpos) - 1
 
 
-def find_column(lexpos):
-    ans = (lexpos - find_line_start(lexpos)) + 1
+def find_column(lexpos, lexdata=None):
+    ans = (lexpos - find_line_start(lexpos, lexdata)) + 1
     #print(f"find_column({lexpos}) -> {ans}")
     return ans
 
 
-def find_line(lexpos):
-    start = find_line_start(lexpos)
-    end = find_line_end(lexpos)
+def find_line(lexpos, lexdata=None):
+    if lexdata is None:
+        lexdata = lexer.lexdata
+    start = find_line_start(lexpos, lexdata)
+    end = find_line_end(lexpos, lexdata)
     #print(f"find_line({lexpos}): start {start}, end {end}")
     if end < 0:
-        return lexer.lexdata[start:]
+        return lexdata[start:]
     else:
-        return lexer.lexdata[start:end + 1]
+        return lexdata[start:end + 1]
 
 
-def syntax_error(msg, lexpos, lineno, filename = None):
+def syntax_error(msg, lexpos, lineno, filename = None, namespace=None):
     global Num_errors
 
     print(f'File "{filename or lexer.filename}", line {lineno}',
           end='', file=sys.stderr)
-    if Namespaces:
-        print(f', in {Namespaces[-1]}', file=sys.stderr)
+    if namespace or Namespaces:
+        print(f', in {namespace or Namespaces[-1]}', file=sys.stderr)
     else:
         print(file=sys.stderr)
-    print(" ", find_line(lexpos), file=sys.stderr)
-    print(" " * find_column(lexpos), "^", file=sys.stderr)
+    if filename is None or filename == lexer.filename:
+        #print("syntax_error using lexer.lexdata")
+        lexdata = lexer.lexdata
+    else:
+        #print(f"syntax_error reading {filename} for lexdata")
+        with open(filename) as f:
+            lexdata = f.read()
+    print(" ", find_line(lexpos, lexdata), file=sys.stderr)
+    print(" " * find_column(lexpos, lexdata), "^", file=sys.stderr)
     print("SyntaxError:", msg)
 
     Num_errors += 1
@@ -452,18 +470,25 @@ def file_basename():
     return os.path.basename(filename()).rsplit('.', 1)[0]
 
 
+lexer = lex.lex()
+
+
 def lex_file(filename=None):
     global Namespaces, Num_errors
 
     if filename is None:
         lexer.input(sys.stdin.read())
+        lexer.filename = "<stdin>"
     else:
         lexer.filename = filename
-        with open(sys.argv[1]) as f:
+        with open(filename) as f:
             lexer.input(f.read())
+
+    lexer.lineno = 1
 
     Namespaces = []
     Num_errors = 0
+    return lexer
 
 
 def check_for_errors():
@@ -471,10 +496,6 @@ def check_for_errors():
         print(file=sys.stderr)
         print("Number of Errors:", Num_errors, file=sys.stderr)
         sys.exit(1)
-
-
-lexer = lex.lex()
-lexer.filename = "<stdin>"
 
 
 if __name__ == "__main__":

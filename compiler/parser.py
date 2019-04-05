@@ -1,5 +1,7 @@
 # parser.py
 
+import operator
+import os.path
 import ply.yacc as yacc
 
 from scanner import tokens, syntax_error, lex_file, Token, check_for_errors
@@ -7,7 +9,12 @@ from symtable import (
     pop_namespace, current_namespace, top_namespace, Module, Opmode,
     Subroutine, Function, Use, Typedef, Labeled_block, Block,
     DLT, Conditions, Actions, Variable, Required_parameter, Optional_parameter,
+    Statement, Call_statement, Opeq_statement,
 )
+
+
+Modules_needed = []
+Modules_seen = {}
 
 
 start = 'file'
@@ -36,6 +43,7 @@ def p_empty_tuple(p):
 
 def p_first(p):
     '''
+    int_expr : INTEGER
     expr : primary
     primary : STRING
             | FLOAT
@@ -56,6 +64,7 @@ def p_first(p):
 def p_second(p):
     '''
     primary : '(' expr ')'
+    int_expr : '(' int_expr ')'
     returning_opt : RETURNING idents
     taking_opt : TAKING idents
     '''
@@ -64,6 +73,8 @@ def p_second(p):
 
 def p_none(p):
     '''
+    newlines_opt :
+    newlines_opt : newlines_opt NEWLINE
     newlines : NEWLINE
     newlines : newlines NEWLINE
     opmode : opmode_type OPMODE make_opmode newlines uses
@@ -162,30 +173,73 @@ def p_all(p):
          | expr NAEQ expr
     primary : primary '.' IDENT
             | primary '[' expr ']'
+    lvalue : primary '.' IDENT
+    lvalue : primary '[' expr ']'
+    """
+    p[0] = tuple(p[1:])
+
+
+def p_int_expr_uminus(p):
+    r"""
+    int_expr : '-' int_expr               %prec UMINUS
+    """
+    p[0] = -p[2]
+
+
+def p_int_expr_binary(p):
+    r"""
+    int_expr : int_expr '^' int_expr
+             | int_expr '*' int_expr
+             | int_expr '%' int_expr
+             | int_expr '+' int_expr
+             | int_expr '-' int_expr
+    """
+    p[0] = int_ops[p[2]](p[1], p[3])
+
+int_ops = {
+    '^': operator.pow,
+    '*': operator.mul,
+    '%': operator.mod,
+    '+': operator.add, 
+    '-': operator.sub, 
+}
+
+def p_simple_statement1(p):
+    r"""
     simple_statement : PASS
-                     | primary arguments
                      | PREPARE primary arguments
                      | REUSE expr
+                     | REUSE expr RETURNING_TO expr
                      | RELEASE primary
                      | SET lvalue kw_to expr
                      | UNPACK lvalues kw_from expr
-                     | primary OPEQ expr
-                     | primary arguments RETURNING_TO expr
-                     | REUSE expr RETURNING_TO expr
                      | GOTO primary pos_arguments
                      | GOTO primary pos_arguments RETURNING_TO expr
                      | RETURN exprs
                      | RETURN exprs kw_to expr
-    lvalue : primary '.' IDENT
-    lvalue : primary '[' expr ']'
     """
-    p[0] = tuple(p)
+    p[0] = Statement(*p[1:])
+
+
+def p_simple_statement2(p):
+    r"""
+    simple_statement : primary arguments
+                     | primary arguments RETURNING_TO expr
+    """
+    p[0] = Call_statement(*p[1:])
+
+
+def p_simple_statement3(p):
+    r"""
+    simple_statement : primary OPEQ expr
+    """
+    p[0] = Opeq_statement(p[1], p[2], p[3])
 
 
 def p_file(p):
     r'''
-    file : opmode
-         | module
+    file : newlines_opt opmode
+         | newlines_opt module
     '''
     p[0] = top_namespace()
 
@@ -199,7 +253,7 @@ def p_primary(p):
     '''
     primary : '{' primary arguments '}'
     '''
-    p[0] = ('get', p[2], p[3])
+    p[0] = ('call_fn', p[2], p[3])
 
 
 def p_ident_ref(p):
@@ -216,12 +270,16 @@ def p_lvalue(p):
 
 def p_make_opmode(p):
     'make_opmode :'
-    Opmode()
+    Opmode(Modules_seen)
 
 
 def p_make_module(p):
     'make_module :'
-    Module()
+    module = Module()
+    name = module.name.value
+    assert name not in Modules_seen
+    #print("make_module seen", name)
+    Modules_seen[name] = module
 
 
 def p_parameter1(p):
@@ -247,12 +305,14 @@ def p_kw_to(p):
     'kw_to : KEYWORD'
     if p[1].value.lower() != 'to:':
         syntax_error("Expected 'TO:'", p[1].lexpos, p[1].lineno)
+    p[0] = p[1]
 
 
 def p_kw_from(p):
     'kw_from : KEYWORD'
     if p[1].value.lower() != 'from:':
         syntax_error("Expected 'FROM:'", p[1].lexpos, p[1].lineno)
+    p[0] = p[1]
 
 
 def p_use1(p):
@@ -260,6 +320,10 @@ def p_use1(p):
     use : USE ident_ref arguments newlines
     '''
     Use(p[2], p[2], p[3])
+    name = p[2].value
+    if name not in Modules_seen:
+        #print("Use adding", name)
+        Modules_needed.append(p[2])
 
 
 def p_use2(p):
@@ -267,6 +331,10 @@ def p_use2(p):
     use : USE ident_ref AS IDENT arguments newlines
     '''
     Use(p[4], p[2], p[5])
+    name = p[2].value
+    if name not in Modules_seen:
+        #print("Use adding", name)
+        Modules_needed.append(p[2])
 
 
 def p_typedef(p):
@@ -292,7 +360,7 @@ def p_vartype(p):
 
 def p_dim(p):
     '''
-    vartype : DIM IDENT '[' expr ']' newlines
+    vartype : DIM IDENT '[' int_expr ']' newlines
     '''
     current_entity = current_namespace().lookup(p[2], error_not_found=False)
     if isinstance(current_entity, Reference) or \
@@ -375,23 +443,67 @@ def p_error(t):
     syntax_error("p_error: Syntax Error", t.lexpos, t.lineno)
 
 
-parser = yacc.yacc()
+parser = yacc.yacc()  # (start='opmode')
 
 
-def parse(filename, debug=False):
-    lex_file(filename)
-    ans = parser.parse(debug=debug)
+def parse_opmode(filename, debug=False):
+    global path
+    dirname = os.path.dirname(filename)
+    path = [dirname]
+    libsdir = os.path.join(os.path.dirname(os.path.abspath(dirname)), "libs")
+    if os.path.isdir(libsdir):
+        for entry in os.scandir(libsdir):
+            if entry.is_dir():
+                path.append(entry.path)
+    #print("path", path)
+    return parse(filename, 'opmode', debug)
+
+
+def parse(filename, file_type='module', debug=False):
+    #print("parse", filename, file_type)
+    lexer = lex_file(filename)
+    ans = parser.parse(lexer=lexer, debug=debug)
     check_for_errors()
     assert ans is not None
+    module_parsed = True
+    while module_parsed:
+        module_parsed = False
+        for m in Modules_needed:
+            if m.value not in Modules_seen:
+                parse(find_module(m), debug=debug)
+                module_parsed = True
     return ans
+
+
+def find_module(ref_token):
+    import sys
+    for p in path:
+        full_name = os.path.join(p, ref_token.value + '.module')
+        #print("find_module", ref_token, "checking", full_name)
+        if os.path.isfile(full_name):
+            return full_name
+    #print("find_module:", ref_token, ref_token.lineno)
+    syntax_error(f"module {ref_token.value} not found",
+                 ref_token.lexpos, ref_token.lineno, ref_token.filename,
+                 ref_token.namespace)
 
 
 if __name__ == "__main__":
     import sys
 
     assert len(sys.argv) == 2
-    top_entity = parse(sys.argv[1], # debug=True,
-                      )
-    print("top_entity", top_entity)
+    filename = sys.argv[1]
+    top_entity = parse_opmode(filename, # debug=True,
+                             )
+    print("top_entity is", top_entity)
+    print()
+    print("dump:")
+    print()
     top_entity.dump(sys.stdout)
+
+    print()
+    print("code:")
+    print()
+    import C_gen
+    C_gen.gen_program(top_entity)
 
