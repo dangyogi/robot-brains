@@ -1,8 +1,11 @@
 # C_gen.py
 
+import sys
+import os.path
 from functools import partial
 
-from symtable import indent_str
+import symtable
+from scanner import syntax_error
 
 
 Struct_indent = 0
@@ -104,7 +107,7 @@ expr_binary = {
 types = {
     "float": "double",
     "integer": "int",
-    "bool": "bool",
+    "bool": "char",
     "string": "char *",
 }
 
@@ -112,92 +115,338 @@ types = {
 preamble = '''
 
 struct sub_ret_s {
-    void *module_context;
+    void *context;
     void *label;
 };
 
-struct pos_param_block__f {
-    double param1_f;
-    double param2_f;
-    double param3_f;
-    double param4_f;
-    double param5_f;
-    double param6_f;
+struct pos_param_block__i {
+    long param_1;
+    long param_2;
+    long param_3;
+    long param_4;
+    long param_5;
+    long param_6;
 };
 
-struct fn_ret_s {
-    struct sub_ret_s sub_ret_info;
+struct fn_ret_i_s {
+    void  *context;
+    void **labels;    // goto *ret_labels[num_args_returned] to return
+    struct pos_param_block__i *ret_params;
+};
+
+struct pos_param_block__f {
+    double param_1;
+    double param_2;
+    double param_3;
+    double param_4;
+    double param_5;
+    double param_6;
+};
+
+struct fn_ret_f_s {
+    void  *context;
+    void **labels;    // goto *ret_labels[num_args_returned] to return
     struct pos_param_block__f *ret_params;
 };
 
-struct pos_param_bloc__f_with_return {
-    struct sub_ret_s sub_ret_info;
-    struct pos_param_block__f *params;
+struct pos_param_block__s {
+    char *param_1;
+    char *param_2;
+    char *param_3;
+    char *param_4;
+    char *param_5;
+    char *param_6;
 };
 
+struct fn_ret_s_s {
+    void  *context;
+    void **labels;    // goto *ret_labels[num_args_returned] to return
+    struct pos_param_block__s *ret_params;
+};
+
+struct pos_param_block__b {
+    bool param_1;
+    bool param_2;
+    bool param_3;
+    bool param_4;
+    bool param_5;
+    bool param_6;
+};
+
+struct fn_ret_b_s {
+    void  *context;
+    void **labels;    // goto *ret_labels[num_args_returned] to return
+    struct pos_param_block__b *ret_params;
+};
 '''
+
 
 def gen_program(opmode):
     print(f"// {opmode.name.value}.c")
     print(preamble)
+    modules = [opmode] + sorted(opmode.modules_seen.values(),
+                                key=lambda m: m.name.value)
+    def do(fn):
+        ans = []
+        for m in modules:
+            result = fn(m)
+            if result:
+                ans.extend(result)
+        return ans
+
+    do(assign_names)
+    do(gen_typedefs)
+    lines = do(gen_code)
+    do(gen_globals)
+    emit_code_start()
+    do(gen_start_labels)
+    do(gen_init)
+    for line in lines:
+        print(line)
+    emit_code_end()
+
+
+def assign_names(m):
+    if isinstance(m, symtable.Opmode):
+        m.C_global_name = translate_name(m.name.value)
+    else:
+        m.C_global_name = \
+          "__".join((os.path.basename(os.path.dirname(m.filename)),
+                     translate_name(m.name.value)))
+    assign_child_names(m)
+
+
+def assign_child_names(parent):
+    for obj in parent.names.values():
+        obj.prepare()
+        if isinstance(obj, symtable.Variable):
+            # name defined inside namespace struct
+            if obj.assignment_seen:
+                obj.C_local_name = translate_name(obj.name.value)
+        elif isinstance(obj, symtable.Use):
+            # name defined inside namespace struct
+            obj.C_local_name = translate_name(obj.name.value)
+        elif isinstance(obj, symtable.Typedef):
+            # name defined globally
+            obj.C_global_name = \
+              parent.C_global_name + "__" + translate_name(obj.name.value)
+        elif isinstance(obj, symtable.Labeled_block):
+            # name defined globally
+            obj.C_global_name = \
+              parent.C_global_name + "__" + translate_name(obj.name.value)
+        elif isinstance(obj, symtable.Subroutine):
+            obj.C_local_name = translate_name(obj.name.value)
+            obj.C_global_name = parent.C_global_name + "__" + obj.C_local_name
+            obj.C_temps = []  # [(type, name)]
+            assign_child_names(obj)
+        else:
+            # This seems to only be References
+            if (False):
+                print("assign_child_names: ignoring",
+                      obj.__class__.__name__, obj.name.value, "in",
+                      parent.__class__.__name__, parent.name.value)
+
+
+def translate_name(name):
+    if not name[-1].isdecimal() and not name[-1].isalpha():
+        return name[:-1].lower() + '_'
+    return name.lower()
+
 
 def translate_type(type):
     return types.get(type.lower(), type)
 
+ret_struct_names = {
+    'FLOAT': 'fn_ret_f_s',
+    'INTEGER': 'fn_ret_i_s',
+    'STRING': 'fn_ret_s_s',
+    'BOOL': 'fn_ret_b_s',
+}
+
+
+def gen_typedefs(parent):
+    for obj in parent.names.values():
+        if isinstance(obj, symtable.Typedef):
+            if obj.definition[0].value.upper() == 'FUNCTION':
+                if obj.definition[2]:
+                    # explicit RETURNING clause
+                    if len(obj.definition[2]) <= 6 \
+                       and len(frozenset(r.value.upper()
+                                         for r in obj.definition[2])) == 1 \
+                       and obj.definition[0].value.upper() in ret_struct_names:
+                        # <= 6 return parameters, all same fundamental type
+                        ret_struct = \
+                          ret_struct_names[obj.definition[0].value.upper()]
+                    else:
+                        print("gen_typedefs: creating new return type for",
+                              obj.name.value, "in", parent.name.value,
+                              file=sys.stderr)
+                        ret_struct = f"{obj.C_global_name}__ret_s"
+                        emit_struct_start(ret_struct)
+                        for i, t in enumerate(obj.definition[2], 1):
+                            emit_struct_variable(t, f"param_{i}")
+                        emit_struct_end()
+                else:
+                    # no explicit RETURNING clause, take return type from name
+                    ret_struct = ret_struct_names[obj.name.type.upper()]
+                ret_name = 'fn_ret_info'
+            else: # SUBROUTINE
+                ret_struct = 'sub_ret_s'
+                ret_name = 'sub_ret_info'
+            emit_struct_start(obj.C_global_name)
+            _emit_struct_variable(f"struct {ret_struct}", ret_name)
+            for i, t in enumerate(obj.definition[1], 1):
+                emit_struct_variable(t, f"param_{i}")
+            emit_struct_end()
+        elif isinstance(obj, symtable.Subroutine):
+            for child in obj.names.values():
+                gen_typedefs(child)
+
+
+def gen_code(m):
+    lines = []
+    for sub in m.names.values():
+        if isinstance(sub, symtable.Subroutine):
+
+            def gen_label(label):
+                lines.append('')
+                lines.append(prepare_label(label))
+                return label
+
+            def gen_init_defaults(parameters, num_defaults, label_format):
+                # generate start labels and default code:
+                labels = ['too_few_arguments' * num_req_pos]
+                num_req_params = len(parameters) - num_defaults
+                for i in range(num_req_params, len(parameters)):
+                    labels.append(gen_label(label_format.format(i)))
+                    # gen default code
+                    statements, C_expr, _, _ = gen_expr(parameters[i][1])
+                    lines.extend(prepare_statements(statements))
+                    lvalue = gen_lvalue(parameters[i][0])[1]
+                    lines.extend(prepare_statements([f"{lvalue} = {C_expr};"]))
+                return labels
+
+            # generate start labels and pos defaults:
+            label_format = f"{sub.C_global_name}_start_{{}}"
+            sub.start_labels = \
+              gen_init_defaults(sub.pos_parameters, sub.num_pos_defaults,
+                                label_format)
+            if sub.no_kw_defaults:
+                # This final label will fall-through to the subroutine code
+                sub.start_labels.append(
+                  gen_label(label_format.format(len(sub.pos_parameters))))
+            else:
+                need_return = bool(sub.num_pos_defaults)
+                # generate keyword defaults.  The last of these will
+                # fall-through to the subroutine code.
+                sub.kw_labels = {}  # {kw: [labels]}
+                                    # excludes labels[num_params] --
+                                    #    no defaults left to initialize!
+                for kw, params in self.kw_parameters.items():
+                    if need_return:
+                        gen_sub_return(sub)
+                    sub.kw_labels[kw] = gen_init_defaults(
+                      params,
+                      sub.num_kw_defaults[kw],
+                      f"{sub.C_global_name}_kw_param_init_{{}}")
+                    need_return = bool(sub.num_kw_defaults[kw])
+
+            if sub.first_block:
+                gen_block(sub.first_block)
+            for labeled_block in sub.names.values():
+                if isinstance(labeled_block, symtable.Labeled_block):
+                    if labeled_block.seen_default:
+                        syntax_error("default parameters on labels not yet "
+                                       "implemented",
+                                     labeled_block.name.lexpos,
+                                     labeled_block.name.lineno,
+                                     labeled_block.name.filename,
+                                     labeled_block.name.namespace)
+                    for param in labeled_block.pos_parameters:
+
+
+
+def gen_globals(m):
+    structs = []
+    names = []
+    for obj in m.names.values():
+        if isinstance(obj, symtable.Subroutine):
+            structs.append(obj.C_global_name)
+            names.append(obj.C_local_name)
+            emit_struct_start(obj.C_global_name)
+            if isinstance(obj, symtable.Function):
+                _emit_struct_variable(
+                  f'struct {ret_struct_names[obj.name.type]}',
+                  'fn_ret_info')
+            else:
+                _emit_struct_variable('struct sub_ret_s', 'sub_ret_info')
+            for var in obj.names.values():
+                if isinstance(var, symtable.Variable) and var.assignment_seen:
+                    emit_struct_variable(var.type, var.C_local_name)
+            if obj.dlt_mask_needed:
+                _emit_struct_variable('unsigned long', 'dlt_mask')
+            for t, n in obj.C_temps:
+                _emit_struct_variable(t, n)
+            emit_struct_end()
+    emit_struct_start(translate_name(m.name.value))
+    for s, n in zip(structs, names):
+        _emit_struct_variable(f"struct {s}", n)
+    emit_struct_end()
+
+
 def emit_struct_start(name):
     global struct_temps, struct_seen_dlt_mask
     print()
-    print(indent_str(Struct_indent), f"struct {name} {{", sep='')
+    print(symtable.indent_str(Struct_indent), f"struct {name} {{", sep='')
     struct_temps = []
     struct_seen_dlt_mask = False
     return f"struct {name}"
 
+
 def emit_struct_variable(type, name, dim=None):
     _emit_struct_variable(types[type], name, dim)
 
-def _emit_struct_variable(type, name, dim=None):
-    if dim is None:
-        print(indent_str(Struct_var_indent), f"{type} {name};", sep='')
-    else:
-        print(indent_str(Struct_var_indent), f"{type} {name}[{dim}];",
-              sep='')
 
 def emit_struct_sub_ret_info():
     _emit_struct_variable("struct sub_ret_s", "sub_ret_info")
 
+
 def emit_struct_fn_ret_info():
     _emit_struct_variable("struct fn_ret_s", "fn_ret_info")
+
 
 def emit_struct_dlt_mask():
     global struct_seen_dlt_mask
     struct_seen_dlt_mask = True
+
 
 def emit_struct_end():
     for type, name in struct_temps:
         emit_struct_variable(type, name)
     if struct_seen_dlt_mask:
         _emit_struct_variable('unsigned long', 'dlt_mask')
-    print(indent_str(Struct_indent), "};", sep='')
+    print(symtable.indent_str(Struct_indent), "};", sep='')
+
 
 def emit_code_start():
-    print("int main(int argc, char **argv, char **env) {")
-    print(indent_str(Label_indent), "void *current_module;", sep='')
     print()
+    print("int main(int argc, char **argv, char **env) {")
+    print(symtable.indent_str(Label_indent), "void *current_module;", sep='')
+    print()
+
 
 def emit_code_end():
     print("}")
 
-def emit_label(name):
-    print(indent_str(Label_indent), f"{name}:", sep='')
 
-def emit_statements(statements):
-    for line in lines:
-        print(indent_str(Statement_indent), line, sep='')
+def prepare_label(name):
+    return f"{symtable.indent_str(Label_indent)}{name}:"
 
-def reset_temps():
-    r'''Called at the start of each statement.gen_code
-    '''
-    pass
+
+def prepare_statements(statements):
+    return [f"{symtable.indent_str(Statement_indent)}{line}"
+            for line in statements]
+
 
 def gen_expr(expr):
     r'''Returns (statements,), C code, C precedence level, C associativity
@@ -218,6 +467,7 @@ def gen_expr(expr):
             return convert_binary(gen_expr(expr[0]), expr[1], gen_expr(expr[2]))
     return convert_token(expr)
 
+
 def gen_lvalue(lvalue):
     r'''Returns (statements,), C code, C precedence level, C associativity
 
@@ -227,18 +477,22 @@ def gen_lvalue(lvalue):
     '''
     return gen_expr(lvalue)
 
+
 def convert_token(token):
     # FIX
     print("convert_atom", token)
     return (), token.value, 100, 'nonassoc'
 
+
 def convert_unary(oper, expr):
     print("convert_unary", oper, expr)
     return expr_unary[oper](oper, expr)
 
+
 def convert_binary(left_expr, oper, right_expr):
     print("convert_binary", left_expr, oper, right_expr)
     return expr_binary[oper](left_expr, oper, right_expr)
+
 
 def convert_call_fn(fn, arguments):
     # FIX

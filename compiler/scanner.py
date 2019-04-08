@@ -61,7 +61,6 @@ reserved = frozenset((
     'TAKING',
     'TELEOP',
     'TYPE',
-    'UNPACK',
     'USE',
 ))
 
@@ -235,7 +234,7 @@ def t_KEYWORD(t):
 
 def t_STRING_IDENT(t):
     r'[a-zA-Z_][a-zA-Z_0-9]*\$'
-    t.value = Token(t, type='str')
+    t.value = Token(t, type='string')
     t.type = 'IDENT'
     return t
 
@@ -268,7 +267,7 @@ def t_INT_IDENT(t):
             t.value = float(t.value)
             t.type = 'FLOAT'
     else:
-        t.value = Token(t, type='int')
+        t.value = Token(t, type='integer')
         t.type = 'IDENT'
     return t
 

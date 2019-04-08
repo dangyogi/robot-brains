@@ -1,8 +1,64 @@
 // autonomous.c
 
+/*
+Sub:
+  - prepare:
+    - check and set prepared flag
+    - set all params to args
+    - set defaults:
+      - call pos defaults
+      - call each kw defaults in definition order
+      - all of these return because prepared flag is set
+  - release:
+    - check and reset prepared flag
+  - reuse:
+    - check and set running flag
+    - set ret_info.context to global context
+    - set ret_info.label to return label
+    - set global context to sub
+    - goto sub.reuse_label
+  - call:
+    - check prepared flag not set
+    - check and set running flag
+    - set all params to args
+    - set defaults:
+      - call pos defaults
+      - call each kw defaults in definition order
+      - final one gets reuse ret_info
+  - return:
+    - check and reset running flag
+    - set global context to ret_info.context
+    - goto ret_info.label
+*/
+
+
+// defined in main()
+struct param_block_descriptor_s {
+    char *kw_name;   // NULL for pos_parameters
+    unsigned long param_block_offset;
+    void *default_labels[];  // indexed by num_params_passed in block
+};
+
+
+// defined in main()
+struct code_descriptor_s { // shared by all instances
+    char  *name;                          // constant set in declaration
+    long   num_param_blocks;
+    void  *reuse_label;
+    struct param_block_descriptor_s *param_blocks[];
+};
+
+
+struct code_header_s {     // one for each instance
+    struct autonomous_module *global;     // constant set in one-time init fn
+    struct code_descriptor_s *descriptor; // constant set in one-time init fn
+    unsigned long current_lineno;
+    unsigned long flags;
+};
+
 
 struct sub_ret_s {
-    void *module_context;
+    void *context;
     void *label;
 };
 
@@ -16,36 +72,48 @@ struct pos_param_block__f {
 };
 
 
-struct fn_ret_s {
-    struct sub_ret_s sub_ret_info;
+struct fn_ret_f_s {
+    void  *context;
+    void **labels;   // goto *labels[num_args_returned] to return
     struct pos_param_block__f *ret_params;
 };
 
 
-struct pos_param_block__f_with_return {
-    struct sub_ret_s sub_ret_info;
-    struct pos_param_block__f params;
-};
-
-
 struct init_sub {
+    struct code_header_s __header__;
     struct sub_ret_s sub_ret_info;
 };
 
 
 struct start_sub {
-    struct sub_ret_s sub_ret_info;
+    struct autonomous_module *global;
+    void **start_labels;
+    char  *name;
+    unsigned long current_lineno;
+    unsigned long flags;
+    struct sub_ret_s ret_info;
 };
 
 
 struct getPosition_fn {
-    struct fn_ret_s fn_ret_info;
+    struct autonomous_module *global;
+    void **start_labels;
+    char  *name;
+    unsigned long current_lineno;
+    unsigned long flags;
+    struct fn_ret_f_s ret_info;
     double start;
     double position;
 };
 
 
 struct move_sub {
+    struct autonomous_module *global;
+    void **start_labels;
+    char  *name;
+    unsigned long current_lineno;
+    unsigned long flags;
+    void **start_labels;
     struct sub_ret_s sub_ret_info;
     double dist;
     double start;
@@ -63,6 +131,7 @@ struct autonomous_module {
 
 
 struct set_power_sub {
+    void **start_labels;
     struct sub_ret_s sub_ret_info;
     double leftMotor;
     double rightMotor;
@@ -75,6 +144,7 @@ struct dual_module {
 
 
 struct report_sub {
+    void **start_labels;
     struct sub_ret_s sub_ret_info;
     char *key;
     double value;
@@ -87,6 +157,7 @@ struct telemetry_module {
 
 
 struct next_sub {
+    void **start_labels;
     struct sub_ret_s sub_ret_info;
 };
 

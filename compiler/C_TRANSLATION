@@ -1,0 +1,60 @@
+- all code is generated into one "main()" function.
+  - uses jump labels and gcc &&label within the routines.
+- routine_descriptor has:
+  - char *name
+  - void *start_label;
+  - int num_params_blocks
+  - param_block_descriptors[]
+- param_block_descriptor has:
+  - char *name;                 // NULL for pos_params
+  - int param_block_offset;     // offset from context
+  - int default_param_offset;   // offset from context to first default param
+  - int defaults_size;          // sizeof defaults block
+  - void *defaults_block;
+  - int default_offsets[];      // indexed by num args passed
+- label only has param_block_descriptor (name field is label name)
+  - label pointer has:
+    - void *label_context       // also serves as param_context
+    - void *label
+    - param_block_descriptor *  // only includes if label has parameters
+- sub_ret_info
+  - void *context
+  - void *label
+- fn_ret_info
+  - sub_ret_info
+  - void *param_context         // allows returning value to different context
+  - param_block_descriptor *
+
+
+- goto (passes params, no return, might be to pointer)
+  - pointer is label_pointer, otherwise info known at compile time
+  - steps:
+    - store parameters
+    - memcpy defaults                     // can be skipped if known label with
+                                          // no defaults
+    - restore label_context               // can be skipped if known label in
+                                          // same context
+    - goto *label
+
+- return
+  - check my running flag
+  - set params through *param_block
+  - reset my running flag
+  - restore context
+  - goto label
+
+- call
+  - check not remote prepared
+  - check and set remote running flag
+  - for each param_block:
+    - set params to remote param_block
+    - memcpy defaults                     // can be skipped if known routine
+                                          // with no defaults on this
+                                          // param_block.
+  - call routine
+    - if calling a fn:
+      - store context in remote param_context
+      - store param_block_descriptor
+    - store context in remote ret_info.context
+    - store ret_label
+    - goto start_label

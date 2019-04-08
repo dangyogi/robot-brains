@@ -37,13 +37,18 @@ def p_empty_tuple(p):
     pos_arguments :
     kw_arguments :
     exprs :
+    returning_opt :
+    taking_opt :
     '''
     p[0] = ()
 
 
 def p_first(p):
     '''
-    int_expr : INTEGER
+    const_expr : STRING
+               | FLOAT
+               | INTEGER
+               | BOOL
     expr : primary
     primary : STRING
             | FLOAT
@@ -64,7 +69,7 @@ def p_first(p):
 def p_second(p):
     '''
     primary : '(' expr ')'
-    int_expr : '(' int_expr ')'
+    const_expr : '(' const_expr ')'
     returning_opt : RETURNING idents
     taking_opt : TAKING idents
     '''
@@ -105,8 +110,6 @@ def p_none(p):
     labeled_blocks : labeled_blocks labeled_block
     labeled_block : LABEL labeled_block_name pos_parameters newlines \
                     first_block
-    returning_opt :
-    taking_opt :
     '''
     p[0] = None
 
@@ -120,13 +123,6 @@ def p_1tuple(p):
     idents : IDENT
     '''
     p[0] = (p[1],)
-
-
-def p_2tuple(p):
-    '''
-    lvalues : lvalue ',' lvalue
-    '''
-    p[0] = (p[1], p[3])
 
 
 def p_append(p):
@@ -144,7 +140,6 @@ def p_append2(p):
     idents : idents ',' IDENT
     pos1_arguments : pos1_arguments ',' expr
     exprs1 : exprs1 ',' expr
-    lvalues : lvalues ',' lvalue
     '''
     p[0] = p[1] + (p[3],)
 
@@ -179,30 +174,52 @@ def p_all(p):
     p[0] = tuple(p[1:])
 
 
-def p_int_expr_uminus(p):
+def p_const_numeric_expr_uminus(p):
     r"""
-    int_expr : '-' int_expr               %prec UMINUS
+    const_expr : '-' const_expr               %prec UMINUS
     """
+    if not isinstance(p[2], (int, float)):
+        syntax_error("Must have numeric operand for unary negate",
+                     p[2].lexpos, p[2].lineno)
     p[0] = -p[2]
 
 
-def p_int_expr_binary(p):
+def p_const_numeric_expr_binary(p):
     r"""
-    int_expr : int_expr '^' int_expr
-             | int_expr '*' int_expr
-             | int_expr '%' int_expr
-             | int_expr '+' int_expr
-             | int_expr '-' int_expr
+    const_expr : const_expr '^' const_expr
+               | const_expr '*' const_expr
+               | const_expr '/' const_expr
+               | const_expr '%' const_expr
+               | const_expr '+' const_expr
+               | const_expr '-' const_expr
     """
-    p[0] = int_ops[p[2]](p[1], p[3])
+    if not isinstance(p[1], (int, float)):
+        syntax_error(f"Must have numeric operand for {p[2]}",
+                     p[1].lexpos, p[1].lineno)
+    if not isinstance(p[3], (int, float)):
+        syntax_error(f"Must have numeric operand for {p[2]}",
+                     p[3].lexpos, p[3].lineno)
+    p[0] = ops[p[2]](p[1], p[3])
 
-int_ops = {
+ops = {
     '^': operator.pow,
     '*': operator.mul,
+    '/': lambda a, b: a // b if a % b == 0 else a / b,
     '%': operator.mod,
     '+': operator.add, 
     '-': operator.sub, 
 }
+
+
+def p_const_bool_expr_uminus(p):
+    r"""
+    const_expr : NOT const_expr
+    """
+    if not isinstance(p[2], bool):
+        syntax_error("Must have bool operand for unary NOT",
+                     p[2].lexpos, p[2].lineno)
+    p[0] = not p[2]
+
 
 def p_simple_statement1(p):
     r"""
@@ -212,7 +229,6 @@ def p_simple_statement1(p):
                      | REUSE expr RETURNING_TO expr
                      | RELEASE primary
                      | SET lvalue kw_to expr
-                     | UNPACK lvalues kw_from expr
                      | GOTO primary pos_arguments
                      | GOTO primary pos_arguments RETURNING_TO expr
                      | RETURN exprs
@@ -291,7 +307,7 @@ def p_parameter1(p):
 
 def p_parameter2(p):
     '''
-    parameter : IDENT '=' expr
+    parameter : IDENT '=' const_expr
     '''
     Optional_parameter(p[1], p[3])
 
@@ -305,13 +321,6 @@ def p_kw_to(p):
     'kw_to : KEYWORD'
     if p[1].value.lower() != 'to:':
         syntax_error("Expected 'TO:'", p[1].lexpos, p[1].lineno)
-    p[0] = p[1]
-
-
-def p_kw_from(p):
-    'kw_from : KEYWORD'
-    if p[1].value.lower() != 'from:':
-        syntax_error("Expected 'FROM:'", p[1].lexpos, p[1].lineno)
     p[0] = p[1]
 
 
@@ -360,8 +369,10 @@ def p_vartype(p):
 
 def p_dim(p):
     '''
-    vartype : DIM IDENT '[' int_expr ']' newlines
+    vartype : DIM IDENT '[' const_expr ']' newlines
     '''
+    if not isinstance(p[4], int):
+        syntax_error("Must have integer DIM", p[4].lexpos, p[4].lineno)
     current_entity = current_namespace().lookup(p[2], error_not_found=False)
     if isinstance(current_entity, Reference) or \
        isinstance(current_entity, Variable) and current_entity.assignment_seen:
@@ -462,7 +473,7 @@ def parse_opmode(filename, debug=False):
 def parse(filename, file_type='module', debug=False):
     #print("parse", filename, file_type)
     lexer = lex_file(filename)
-    ans = parser.parse(lexer=lexer, debug=debug)
+    ans = parser.parse(lexer=lexer, tracking=True, debug=debug)
     check_for_errors()
     assert ans is not None
     module_parsed = True

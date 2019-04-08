@@ -70,7 +70,6 @@ simple_statement: PASS
                 | REUSE expr [RETURNING_TO: expr]
                 | RELEASE primary
                 | SET lvalue TO: expr
-                | UNPACK 2{lvalue,} FROM: expr
                 | primary ('+='|'-='|'*='|'/='|'%='|'^=') expr
                 | GOTO primary {expr,} [RETURNING_TO: expr]
                 | RETURN {expr,} [TO: expr]

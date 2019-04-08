@@ -53,6 +53,9 @@ class Entity(Symtable):
         super().dump_details(f)
         print(f" {self.name.value}", end='', file=f)
 
+    def prepare(self):
+        pass
+
     def gen_prep(self, generator):
         #print(f"{self.name.value}.gen_prep")
         self.gen_name = self.name.value
@@ -136,6 +139,11 @@ class Use(Entity):
 
 
 class Typedef(Entity):
+    r'''definition is either:
+
+       (FUNCTION, taking_opt, returning_opt)
+    or (SUBROUTINE, taking_opt)
+    '''
     def __init__(self, ident, definition):
         Entity.__init__(self, ident)
         self.definition = definition
@@ -170,6 +178,15 @@ class With_parameters:
                                  keyword.lexpos, keyword.lineno)
         self.current_parameters = self.kw_parameters[lname] = []
         self.seen_default = False
+
+    def prepare(self):
+        self.num_pos_defaults = sum(1 for p in self.pos_parameters
+                                      if isinstance(p, Optional_parameter))
+        self.num_kw_defaults = {kw: sum(1 for p in params
+                                          if isinstance(p, Optional_parameter))
+                                for kw, params in self.kw_parameters.items()}
+        self.no_kw_defaults = not any(num
+                                      for num in self.num_kw_defaults.values())
 
     def dump_details(self, f):
         super().dump_details(f)
@@ -280,6 +297,7 @@ class Dummy_token:
 class Opmode(Namespace):
     def __init__(self, modules_seen=None):
         Namespace.__init__(self, Dummy_token(scanner.file_basename()))
+        self.filename = scanner.filename()
         if modules_seen is not None:
             self.modules_seen = modules_seen
 
@@ -309,6 +327,8 @@ class Module(Opmode, With_parameters):
 
 class Subroutine(Namespace, With_parameters):
     struct_name_suffix = "_sub"
+    dlt_mask_needed = False
+    first_block = None
 
     def __init__(self, ident):
         self.parent_namespace = current_namespace()
@@ -318,6 +338,8 @@ class Subroutine(Namespace, With_parameters):
         self.code_name = f"{self.parent_namespace.code_name}__{self.name.value}"
         self.struct_name = self.code_name + self.struct_name_suffix
         self.vars_name = self.name.value + "_vars"
+        self.labels = {}        # {label: parameters} only with parameters
+        self.start_labels = {}  # {base_name: [label]}
 
     def add_first_block(self, first_block):
         if self.current_block is None:
@@ -389,7 +411,6 @@ class Statement(Symtable):
         'reuse': ('expr', 'ignore', 'expr'),
         'release': ('expr'),
         'set': ('lvalue', 'ignore', 'expr'),
-        'unpack': (('*', 'lvalue'), 'ignore', 'expr'),
         'goto': ('expr', ('*', 'expr'), 'ignore', 'expr'),
         'return': (('*', 'expr'), 'ignore', 'expr'),
     }
@@ -400,7 +421,6 @@ class Statement(Symtable):
         'reuse': ('reuse {}',),
         'release': ('release {}',),
         'set': ('{0[0]} = {0[2]}',),
-        'unpack': ('unpack {}',),
         'goto': ('goto {}',),
         'return': ('return {}',),
     }

@@ -39,7 +39,6 @@ reserved words:
     - TAKING
     - TELEOP
     - TYPE
-    - UNPACK
     - USE
 
 literals:
