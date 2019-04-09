@@ -33,6 +33,7 @@ reserved words:
     - RELEASE
     - RETURN
     - RETURNING
+    - RETURNING_TO:
     - REUSE
     - SET
     - SUBROUTINE

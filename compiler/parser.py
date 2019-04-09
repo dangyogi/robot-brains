@@ -350,6 +350,7 @@ def p_typedef(p):
     '''
     typedef : TYPE ident_ref IS FUNCTION taking_opt returning_opt newlines
             | TYPE ident_ref IS SUBROUTINE taking_opt newlines
+            | TYPE ident_ref IS LABEL taking_opt newlines
     '''
     Typedef(p[2], *p[4:-1])
 

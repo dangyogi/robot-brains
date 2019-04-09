@@ -30,10 +30,11 @@ use: USE IDENT [AS IDENT] arguments NEWLINES
 typedef: TYPE IDENT IS FUNCTION [TAKING 1{IDENT,}] [RETURNING 1{IDENT,}]
            NEWLINES
        | TYPE IDENT IS SUBROUTINE [TAKING 1{IDENT,}] NEWLINES
+       | TYPE IDENT IS LABEL [TAKING 1{IDENT,}] NEWLINES
 
 
 vartype: IDENT IS IDENT NEWLINESS
-       | DIM IDENT '[' expr ']' NEWLINES
+       | DIM IDENT '[' const_expr ']' NEWLINES
 
 
 fn_decl: FUNCTION IDENT parameters
@@ -57,7 +58,7 @@ labeled_block: LABEL IDENT {parameter,} NEWLINES
 parameters: {parameter,} {KEYWORD 1{parameter,}}
 
 
-parameter: IDENT ['=' expr]
+parameter: IDENT ['=' const_expr]
 
 
 statement: simple_statement NEWLINES
