@@ -27,10 +27,10 @@ module: MODULE parameters NEWLINES
 use: USE IDENT [AS IDENT] arguments NEWLINES
 
 
-typedef: TYPE IDENT IS FUNCTION [TAKING 1{IDENT,}] [RETURNING 1{IDENT,}]
+typedef: TYPE IDENT IS FUNCTION [TAKING 1{IDENT}] [RETURNING 1{IDENT}]
            NEWLINES
-       | TYPE IDENT IS SUBROUTINE [TAKING 1{IDENT,}] NEWLINES
-       | TYPE IDENT IS LABEL [TAKING 1{IDENT,}] NEWLINES
+       | TYPE IDENT IS SUBROUTINE [TAKING 1{IDENT}] NEWLINES
+       | TYPE IDENT IS LABEL [TAKING 1{IDENT}] NEWLINES
 
 
 vartype: IDENT IS IDENT NEWLINESS
@@ -51,11 +51,11 @@ seb_decl: SUBROUTINE IDENT parameters
           {labeled_block}
 
 
-labeled_block: LABEL IDENT {parameter,} NEWLINES
+labeled_block: LABEL IDENT {parameter} NEWLINES
                {statement}
 
 
-parameters: {parameter,} {KEYWORD 1{parameter,}}
+parameters: {parameter} {KEYWORD 1{parameter}}
 
 
 parameter: IDENT ['=' const_expr]
@@ -66,14 +66,14 @@ statement: simple_statement NEWLINES
 
 
 simple_statement: PASS
-                | primary arguments [RETURNING_TO: expr]
+                | primary arguments [RETURNING_TO: primary]
                 | PREPARE primary arguments
-                | REUSE expr [RETURNING_TO: expr]
+                | REUSE primary [RETURNING_TO: primary]
                 | RELEASE primary
-                | SET lvalue TO: expr
-                | primary ('+='|'-='|'*='|'/='|'%='|'^=') expr
-                | GOTO primary {expr,} [RETURNING_TO: expr]
-                | RETURN {expr,} [TO: expr]
+                | SET lvalue TO: primary
+                | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
+                | GOTO primary {primary} [RETURNING_TO: primary]
+                | RETURN {primary} [TO: primary]
 
 
 dlt: '====' NEWLINE
@@ -117,5 +117,5 @@ primary: STRING | FLOAT | INTEGER | BOOL | IDENT
        | '{' primary arguments '}'
 
 
-arguments: {expr,} {KEYWORD 1{expr,}}
+arguments: {primary} {KEYWORD 1{primary}}
 

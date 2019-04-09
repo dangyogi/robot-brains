@@ -12,7 +12,7 @@ subroutine start
 
 function getPosition start = 0
     set position to:
-    -> (leftMotor.position + rightMotor.position) / 2 * 66.7 - start
+    -> ((leftMotor.position + rightMotor.position) / 2 * 66.7 - start)
     telemetry.report key: "position" value: position
     return position
 

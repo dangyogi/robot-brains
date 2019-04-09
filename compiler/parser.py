@@ -36,7 +36,7 @@ def p_empty_tuple(p):
     '''
     pos_arguments :
     kw_arguments :
-    exprs :
+    primarys :
     returning_opt :
     taking_opt :
     '''
@@ -58,8 +58,6 @@ def p_first(p):
     statement : simple_statement newlines
               | dlt
     pos_arguments : pos1_arguments
-    exprs : exprs1
-    exprs1 : expr
     opmode_type : AUTONOMOUS
                 | TELEOP
     '''
@@ -94,7 +92,7 @@ def p_none(p):
           | decls sub_decl
     parameters : pos_parameters kw_parameters
     pos1_parameters : parameter
-    pos1_parameters : pos1_parameters ',' parameter
+    pos1_parameters : pos1_parameters parameter
     pos_parameters :
                    | pos1_parameters
     kw_parameters :
@@ -118,7 +116,7 @@ def p_1tuple(p):
     '''
     conditions : condition
     actions : action
-    pos1_arguments : expr
+    pos1_arguments : primary
     statements1 : statement
     idents : IDENT
     '''
@@ -131,17 +129,11 @@ def p_append(p):
     statements1 : statements1 statement
     conditions : conditions condition
     actions : actions action
+    idents : idents IDENT
+    pos1_arguments : pos1_arguments primary
+    primarys : primarys primary
     '''
     p[0] = p[1] + (p[2],)
-
-
-def p_append2(p):
-    '''
-    idents : idents ',' IDENT
-    pos1_arguments : pos1_arguments ',' expr
-    exprs1 : exprs1 ',' expr
-    '''
-    p[0] = p[1] + (p[3],)
 
 
 def p_all(p):
@@ -225,14 +217,14 @@ def p_simple_statement1(p):
     r"""
     simple_statement : PASS
                      | PREPARE primary arguments
-                     | REUSE expr
-                     | REUSE expr RETURNING_TO expr
+                     | REUSE primary
+                     | REUSE primary RETURNING_TO primary
                      | RELEASE primary
-                     | SET lvalue kw_to expr
+                     | SET lvalue kw_to primary
                      | GOTO primary pos_arguments
-                     | GOTO primary pos_arguments RETURNING_TO expr
-                     | RETURN exprs
-                     | RETURN exprs kw_to expr
+                     | GOTO primary pos_arguments RETURNING_TO primary
+                     | RETURN primarys
+                     | RETURN primarys kw_to primary
     """
     p[0] = Statement(*p[1:])
 
@@ -240,14 +232,14 @@ def p_simple_statement1(p):
 def p_simple_statement2(p):
     r"""
     simple_statement : primary arguments
-                     | primary arguments RETURNING_TO expr
+                     | primary arguments RETURNING_TO primary
     """
     p[0] = Call_statement(*p[1:])
 
 
 def p_simple_statement3(p):
     r"""
-    simple_statement : primary OPEQ expr
+    simple_statement : primary OPEQ primary
     """
     p[0] = Opeq_statement(p[1], p[2], p[3])
 
