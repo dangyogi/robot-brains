@@ -33,6 +33,7 @@
 
 - module_descriptor has:                // init outside of main
   - char *name
+  - char *filename
   - int num_routines
   - routine_descriptor *routines[]
 
@@ -90,6 +91,7 @@ EXECUTABLE CODE:
   - uses jump labels and gcc &&label within the routines.
 
 - goto (passes params, no return, might be to pointer)
+  - check running set in label_context.flags
   - pointer is label_pointer, otherwise info known at compile time
   - steps:
     - store parameters

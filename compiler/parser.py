@@ -222,7 +222,6 @@ def p_simple_statement1(p):
                      | RELEASE primary
                      | SET lvalue kw_to primary
                      | GOTO primary pos_arguments
-                     | GOTO primary pos_arguments RETURNING_TO primary
                      | RETURN primarys
                      | RETURN primarys kw_to primary
     """

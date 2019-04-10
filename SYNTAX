@@ -72,7 +72,7 @@ simple_statement: PASS
                 | RELEASE primary
                 | SET lvalue TO: primary
                 | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
-                | GOTO primary {primary} [RETURNING_TO: primary]
+                | GOTO primary {primary}
                 | RETURN {primary} [TO: primary]
 
 
