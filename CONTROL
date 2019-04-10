@@ -62,6 +62,8 @@ coroutine
 
 
 producer/consumer:
+    - NEW: probably doesn't use coroutine mechanism above.
+      - See COROUTINES document
     - use coroutines, the consumer is the "caller", and the producer is the
       "coroutine".
     - origin producer
