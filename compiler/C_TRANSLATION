@@ -1,9 +1,13 @@
+Descriptors:
 
 - routine_descriptor has:       // init outside of main (NULL for start_label)
   - char *name
+  - char type                   // 'S' or 'F'
   - void *start_label;          // set in routine init
+  - int routine_offset          // start of module instance to routine instance
   - int num_params_blocks
   - param_block_descriptors[]
+
 - param_block_descriptor has:   // init outside of main
   - char *name;                 // NULL for pos_params
   - int param_block_offset;     // offset from context
@@ -11,6 +15,22 @@
   - int defaults_size;          // sizeof defaults block
   - void *defaults_block;
   - int default_offsets[];      // indexed by num args passed
+
+- use_descriptor has:
+  - char *alias_name
+  - int offset                  // offset from start of containing module to
+                                // used module instance
+
+- module_descriptor has:        // init outside of main
+  - char *name
+  - char *filename
+  - int num_uses
+  - use_descriptor *uses[]
+  - int num_routines
+  - routine_descriptor *routines[]
+
+
+Instances:
 
 - label, sub_ret, fn_ret, sub and fn pointers have:
   - void *context               // also serves as param_context
@@ -31,27 +51,15 @@
   - dlt_mask                            // optional
 
 
-- module_descriptor has:                // init outside of main
-  - char *name
-  - char *filename
-  - int num_routines
-  - routine_descriptor *routines[]
-
-
-- struct module_s has:   // shared by all module instances
-  - module_descriptor *descriptor       // init outside of main
-  - routine instances *[]               // init outside of main
-
-
 - module instance has:
-  - module_descriptor *descriptor       // init outside of main
-  - routine instances *[]               // init outside of main
-  - "use" module instance pointers      // init outside of main
+  - module_descriptor *descriptor
+  - "use" module instances              // init outside of main
   - module parameter/variables          // init inside of main by init C fun
+  - routine instances                   // init outside of main
 
 
-- module instance list (in "uses" tsort order, bottom up)
-  - module_s *[]
+- opmode_instance opmode                // global variable
+- builtin_instance builtins             // global variable
 
 
 SOURCE FILE LAYOUT:
@@ -66,22 +74,21 @@ SOURCE FILE LAYOUT:
 - all struct definitions
   - routine instance structs before their module_structs
   - used module instance structs before using module instance structs
-- all module instance declarations
-  - used modules before using modules
-  - top-level opmode last
-- init C functions
-  - routine init C function
-    - before containing module init C function
-  - module init C function:
-    - initialize module parameters/variables
-    - call all contained routine inits
+- top-level opmode instance declaration
+- builtins declaration
+
 - "main"
   - struct context_s *context;
-  - call module init C functions for each module instance in bottom up order
+  - call builtin_init
+  - call top-level opmode_init
   - code for each module (not instance)
+    - module init code
+      - initialize module parameters/variables
+      - call module inits for used modules
+      - init all contained routines
     - code for each routine in that module (not instance)
   - built-in code
-    - get_routines_by_name(routine_name$) -> TYPE SUBROUTINE generator
+    - get_subroutines_by_name(routine_name$) -> TYPE SUBROUTINE generator
       - in bottom up order
 
 

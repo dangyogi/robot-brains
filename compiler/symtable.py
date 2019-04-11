@@ -1,6 +1,6 @@
 # symtable.py
 
-from collections import OrderedDict
+from collections import OrderedDict, ChainMap
 
 import scanner
 
@@ -25,6 +25,8 @@ def top_namespace():
 
 class Symtable:
     r'''Root of all symtable classes.
+
+    Defines dump.
     '''
     def dump(self, f, indent=0):
         print(f"{indent_str(indent)}{self.__class__.__name__} ", end='', file=f)
@@ -47,13 +49,14 @@ class Entity(Symtable):
         self.set_in_namespace(no_prior_use)
 
     def set_in_namespace(self, no_prior_use):
-        current_namespace().set(self.name, self, no_prior_use)
+        self.parent_namespace = current_namespace()
+        self.parent_namespace.set(self.name, self, no_prior_use)
 
     def dump_details(self, f):
         super().dump_details(f)
         print(f" {self.name.value}", end='', file=f)
 
-    def prepare(self):
+    def prepare(self, opmode):
         pass
 
     def gen_prep(self, generator):
@@ -78,10 +81,53 @@ class Entity(Symtable):
 
 
 class Reference(Entity):
+    r'''Undefined reference within a namespace.
+
+    These are later resolved after the parsing is complete (by prepare).
+    '''
     def __init__(self, ident, **kws):
         Entity.__init__(self, ident)
         for k, v in kws.items():
             setattr(self, k, v)
+
+    def prepare(self, opmode):
+        r'''Resolve reference in parent_namespace, module, opmode, builtins.
+        '''
+        super().prepare(opmode)
+
+        # check in parent
+        referent = self.parent_namespace.lookup(self.name,
+                                                error_not_found=False)
+        if referent is not None:
+            self.referent = referent
+            self.referent_prefix = None
+            return
+
+        # check Module
+        if isinstance(self.parent_namespace, Subroutine):
+            referent = self.parent_namespace.parent_namespace \
+                           .lookup(self.name, error_not_found=False)
+            if referent is not None:
+                self.referent = referent
+                self.referent_prefix = 'global'
+                return
+
+        # check opmode
+        referent = opmode.lookup(self.name, error_not_found=False)
+        if referent is not None:
+            self.referent = referent
+            self.referent_prefix = 'opmode'
+            return
+
+        # check builtins
+        referent = opmode.builtins.lookup(self.name, error_not_found=False)
+        if referent is not None:
+            self.referent = referent
+            self.referent_prefix = 'builtins'
+            return
+
+        scanner.syntax_error("Undefined name", ident.lexpos, ident.lineno,
+                             ident.filename, ident.namespace)
 
 
 class Variable(Entity):
@@ -133,6 +179,10 @@ class Use(Entity):
         self.module_name = module_name
         self.arguments = arguments
 
+    def prepare(self, opmode):
+        super().prepare(opmode)
+        self.module = opmode.modules_seen[self.module_name.value]
+
     def dump_details(self, f):
         super().dump_details(f)
         print(f" module_name={self.module_name}", end='', file=f)
@@ -153,7 +203,7 @@ class Typedef(Entity):
         print(f" definition={self.definition}", end='', file=f)
 
 
-class With_parameters:
+class With_parameters(Entity):
     def __init__(self):
         self.current_parameters = self.pos_parameters = []
         self.kw_parameters = OrderedDict()
@@ -179,7 +229,9 @@ class With_parameters:
         self.current_parameters = self.kw_parameters[lname] = []
         self.seen_default = False
 
-    def prepare(self):
+    def prepare(self, opmode):
+        #print("With_parameters.prepare", self.__class__.__name__, self.name)
+        super().prepare(opmode)
         self.num_pos_defaults = sum(1 for p in self.pos_parameters
                                       if isinstance(p, Optional_parameter))
         self.num_kw_defaults = {kw: sum(1 for p in params
@@ -196,9 +248,8 @@ class With_parameters:
               file=f)
 
 
-class Labeled_block(Entity, With_parameters):
+class Labeled_block(With_parameters):
     def __init__(self, ident):
-        self.parent_namespace = current_namespace()
         Entity.__init__(self, ident)
         With_parameters.__init__(self)
         current_namespace().push_labeled_block(self)
@@ -219,7 +270,7 @@ class Labeled_block(Entity, With_parameters):
 class Namespace(Entity):
     def __init__(self, ident):
         Entity.__init__(self, ident)
-        self.names = OrderedDict()
+        self.names = {}
         #print(f"scanner.Namespaces.append({ident})")
         scanner.Namespaces.append(self)
         self.code_name = self.name.value
@@ -227,15 +278,33 @@ class Namespace(Entity):
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.name.value}>"
 
+    def prepare(self, opmode):
+        #print("Namespace.prepare", self.__class__.__name__, self.name)
+        super().prepare(opmode)
+        for obj in self.names.values():
+            obj.prepare(opmode)
+
     def lookup(self, ident, error_not_found=True):
+        r'''Look up ident in self.names.
+
+        if not found:
+            if error_not_found: generate scanner.syntax_error
+            else: return None
+        '''
         lname = ident.value.lower()
-        if lname not in self.names:
-            if error_not_found:
-                syntax_error("Undefined name", ident.lexpos, ident.lineno)
-            return None
-        return self.names[lname]
+        if lname in self.names:
+            return self.names[lname]
+        if error_not_found:
+            scanner.syntax_error("Undefined name", ident.lexpos, ident.lineno)
+        return None
 
     def set(self, ident, entity, no_prior_use=False):
+        r'''Stores entity in self.names under ident.
+
+        Replaces Reference with entity unless no_prior_use is True.
+
+        Reports duplicate names through scanner.syntax_error.
+        '''
         lname = ident.value.lower()
         current_entity = self.names.get(lname)
         if current_entity is not None and \
@@ -259,8 +328,9 @@ class Namespace(Entity):
         if isinstance(current_entity, Variable):
             current_entity.assignment_seen = True
         else:
-            syntax_error(f"Can not set {current_entity.__class__.__name__}",
-                         ident.lexpos, indent.lineno)
+            scanner.syntax_error(
+                      f"Can not set {current_entity.__class__.__name__}",
+                      ident.lexpos, indent.lineno)
 
     def dump_contents(self, f, indent):
         for entity in self.names.values():
@@ -295,14 +365,22 @@ class Dummy_token:
 
 
 class Opmode(Namespace):
+    r'''self.modules_seen does not have lowered() keys.
+    '''
     def __init__(self, modules_seen=None):
         Namespace.__init__(self, Dummy_token(scanner.file_basename()))
         self.filename = scanner.filename()
+
         if modules_seen is not None:
             self.modules_seen = modules_seen
 
     def set_in_namespace(self, no_prior_use):
         pass
+
+    def dump_details(self, f):
+        super().dump_details(f)
+        print(f" modules_seen: {','.join(self.modules_seen.keys())}",
+              end='', file=f)
 
     def gen_program(self, generator):
         self.gen_prep(generator)
@@ -331,7 +409,6 @@ class Subroutine(Namespace, With_parameters):
     first_block = None
 
     def __init__(self, ident):
-        self.parent_namespace = current_namespace()
         Namespace.__init__(self, ident)
         With_parameters.__init__(self)
         self.current_block = None

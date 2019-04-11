@@ -450,7 +450,6 @@ parser = yacc.yacc()  # (start='opmode')
 
 
 def parse_opmode(filename, debug=False):
-    global path
     dirname = os.path.dirname(filename)
     path = [dirname]
     libsdir = os.path.join(os.path.dirname(os.path.abspath(dirname)), "libs")
@@ -459,36 +458,55 @@ def parse_opmode(filename, debug=False):
             if entry.is_dir():
                 path.append(entry.path)
     #print("path", path)
-    return parse(filename, 'opmode', debug)
 
+    def parse(filename, file_type='module', debug=False):
+        #print("parse", filename, file_type)
+        lexer = lex_file(filename)
+        ans = parser.parse(lexer=lexer, tracking=True, debug=debug)
+        check_for_errors()
+        assert ans is not None
+        return ans
 
-def parse(filename, file_type='module', debug=False):
-    #print("parse", filename, file_type)
-    lexer = lex_file(filename)
-    ans = parser.parse(lexer=lexer, tracking=True, debug=debug)
-    check_for_errors()
-    assert ans is not None
+    ans = parse(filename, 'opmode', debug)
+
+    # always parse 'builtins' module
+    full_name = _find_module('builtins', path)
+    if full_name is None:
+        print("'builtins' module not found", file=sys.stderr)
+        raise SyntaxError
+    parse(full_name, debug=debug)
+
+    # parse all other explicitly mentioned modules
     module_parsed = True
     while module_parsed:
         module_parsed = False
         for m in Modules_needed:
             if m.value not in Modules_seen:
-                parse(find_module(m), debug=debug)
+                parse(find_module(m, path), debug=debug)
                 module_parsed = True
+
+    # return opmode module
     return ans
 
 
-def find_module(ref_token):
-    import sys
+def find_module(ref_token, path):
+    full_name = _find_module(ref_token.value, path)
+    if full_name is None:
+        syntax_error(f"module {ref_token.value} not found",
+                     ref_token.lexpos, ref_token.lineno, ref_token.filename,
+                     ref_token.namespace)
+    return full_name
+
+
+def _find_module(name, path):
+    #print("_find_module", name, path)
     for p in path:
-        full_name = os.path.join(p, ref_token.value + '.module')
-        #print("find_module", ref_token, "checking", full_name)
+        full_name = os.path.join(p, name + '.module')
+        #print("_find_module", name, "checking", full_name)
         if os.path.isfile(full_name):
             return full_name
-    #print("find_module:", ref_token, ref_token.lineno)
-    syntax_error(f"module {ref_token.value} not found",
-                 ref_token.lexpos, ref_token.lineno, ref_token.filename,
-                 ref_token.namespace)
+    #print("_find_module:", name, "not found")
+    return None
 
 
 if __name__ == "__main__":

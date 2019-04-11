@@ -2,6 +2,7 @@
 
 import sys
 import os.path
+import operator
 from functools import partial
 
 import symtable
@@ -112,98 +113,58 @@ types = {
 }
 
 
-preamble = '''
-
-struct sub_ret_s {
-    void *context;
-    void *label;
-};
-
-struct pos_param_block__i {
-    long param_1;
-    long param_2;
-    long param_3;
-    long param_4;
-    long param_5;
-    long param_6;
-};
-
-struct fn_ret_i_s {
-    void  *context;
-    void **labels;    // goto *ret_labels[num_args_returned] to return
-    struct pos_param_block__i *ret_params;
-};
-
-struct pos_param_block__f {
-    double param_1;
-    double param_2;
-    double param_3;
-    double param_4;
-    double param_5;
-    double param_6;
-};
-
-struct fn_ret_f_s {
-    void  *context;
-    void **labels;    // goto *ret_labels[num_args_returned] to return
-    struct pos_param_block__f *ret_params;
-};
-
-struct pos_param_block__s {
-    char *param_1;
-    char *param_2;
-    char *param_3;
-    char *param_4;
-    char *param_5;
-    char *param_6;
-};
-
-struct fn_ret_s_s {
-    void  *context;
-    void **labels;    // goto *ret_labels[num_args_returned] to return
-    struct pos_param_block__s *ret_params;
-};
-
-struct pos_param_block__b {
-    bool param_1;
-    bool param_2;
-    bool param_3;
-    bool param_4;
-    bool param_5;
-    bool param_6;
-};
-
-struct fn_ret_b_s {
-    void  *context;
-    void **labels;    // goto *ret_labels[num_args_returned] to return
-    struct pos_param_block__b *ret_params;
-};
-'''
-
-
 def gen_program(opmode):
-    print(f"// {opmode.name.value}.c")
-    print(preamble)
-    modules = [opmode] + sorted(opmode.modules_seen.values(),
-                                key=lambda m: m.name.value)
-    def do(fn):
-        ans = []
-        for m in modules:
-            result = fn(m)
-            if result:
-                ans.extend(result)
-        return ans
+    global C_file
 
-    do(assign_names)
-    do(gen_typedefs)
-    lines = do(gen_code)
-    do(gen_globals)
-    emit_code_start()
-    do(gen_start_labels)
-    do(gen_init)
-    for line in lines:
-        print(line)
-    emit_code_end()
+    c_filename = f"{opmode.name.value}.c"
+
+    with open(c_filename, 'wt') as C_file:
+
+        # This is modules, _not_ uses (instances)!
+        # ... i.e., each of these may have multiple instances within the
+        #           program.
+        modules = [opmode] + sorted(opmode.modules_seen.values(),
+                                    key=lambda m: m.name.value)
+
+        def do(fn):
+            ans = []
+            for m in modules:
+                result = fn(m)
+                if result:
+                    ans.extend(result)
+            return ans
+
+        print("prepare ....")
+        do(operator.methodcaller('prepare', opmode))
+        print("assign_names ....")
+        do(assign_names)
+        print("gen_code ....")
+        lines = do(gen_code)
+
+        print(f"// {opmode.name.value}.c", file=C_file)
+
+        # Copy in C_preamble file
+        with open("C_preamble") as preamble:
+            for line in preamble:
+                C_file.write(line)
+
+        print("gen_typedefs ....")
+        do(gen_typedefs)
+        print("gen_descriptors ....")
+        do(gen_descriptors)
+
+        print("gen_globals ....")
+        do(gen_globals)
+        print("emit_code_start ....")
+        emit_code_start()
+        print("gen_start_labels ....")
+        do(gen_start_labels)
+        print("gen_init ....")
+        do(gen_init)
+        for line in lines:
+            print(line, file=C_file)
+        print("emit_code_end ....")
+        emit_code_end()
 
 
 def assign_names(m):
@@ -218,7 +179,6 @@ def assign_names(m):
 
 def assign_child_names(parent):
     for obj in parent.names.values():
-        obj.prepare()
         if isinstance(obj, symtable.Variable):
             # name defined inside namespace struct
             if obj.assignment_seen:
@@ -315,8 +275,8 @@ def gen_code(m):
 
             def gen_init_defaults(parameters, num_defaults, label_format):
                 # generate start labels and default code:
-                labels = ['too_few_arguments' * num_req_pos]
                 num_req_params = len(parameters) - num_defaults
+                labels = ['too_few_arguments' * num_req_params]
                 for i in range(num_req_params, len(parameters)):
                     labels.append(gen_label(label_format.format(i)))
                     # gen default code
@@ -352,7 +312,7 @@ def gen_code(m):
                     need_return = bool(sub.num_kw_defaults[kw])
 
             if sub.first_block:
-                gen_block(sub.first_block)
+                lines.extend(gen_block(sub.first_block))
             for labeled_block in sub.names.values():
                 if isinstance(labeled_block, symtable.Labeled_block):
                     if labeled_block.seen_default:
@@ -363,7 +323,18 @@ def gen_code(m):
                                      labeled_block.name.filename,
                                      labeled_block.name.namespace)
                     for param in labeled_block.pos_parameters:
+                        # FIX
+                        pass
+                    lines.extend(gen_block(labeled_block.block))
+    return lines
 
+
+def gen_block(block):
+    lines = []
+    for s in block.statements:
+        # FIX
+        pass
+    return lines
 
 
 def gen_globals(m):
@@ -396,8 +367,9 @@ def gen_globals(m):
 
 def emit_struct_start(name):
     global struct_temps, struct_seen_dlt_mask
-    print()
-    print(symtable.indent_str(Struct_indent), f"struct {name} {{", sep='')
+    print(file=C_file)
+    print(symtable.indent_str(Struct_indent), f"struct {name} {{",
+          sep='', file=C_file)
     struct_temps = []
     struct_seen_dlt_mask = False
     return f"struct {name}"
@@ -425,18 +397,19 @@ def emit_struct_end():
         emit_struct_variable(type, name)
     if struct_seen_dlt_mask:
         _emit_struct_variable('unsigned long', 'dlt_mask')
-    print(symtable.indent_str(Struct_indent), "};", sep='')
+    print(symtable.indent_str(Struct_indent), "};", sep='', file=C_file)
 
 
 def emit_code_start():
-    print()
-    print("int main(int argc, char **argv, char **env) {")
-    print(symtable.indent_str(Label_indent), "void *current_module;", sep='')
-    print()
+    print(file=C_file)
+    print("int main(int argc, char **argv, char **env) {", file=C_file)
+    print(symtable.indent_str(Label_indent), "void *current_module;",
+          sep='', file=C_file)
+    print(file=C_file)
 
 
 def emit_code_end():
-    print("}")
+    print("}", file=C_file)
 
 
 def prepare_label(name):

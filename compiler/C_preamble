@@ -1,0 +1,60 @@
+
+struct routine_descriptor_s {
+    char *name;
+    char type;                  // 'S' 'F', or 'L'
+    void *start_label;          // set in routine init code
+    int routine_offset;         // from start of module instance
+    int num_param_blocks;
+    // first param_block_descriptor is always positional parameters
+    struct param_block_descriptor_s *param_block_descriptors[];
+};
+
+struct param_block_descriptor_s {
+    char *name;                 // NULL for pos_params
+                                // KEYWORD name for kw_params
+                                // LABEL name for Labeled_block params
+    int num_params;             // required and optional
+    int num_required_params;
+    int defaults_size;          // bytes
+    void *defaults_block;
+    int param_offsets[];        // from start of routine instance,
+                                // indexed by parameter number (starting with 0)
+};
+
+struct use_descriptor_s {
+    char *alias_name;
+    int offset;                 // from start of containing module to
+                                // used module instance
+};
+
+struct module_descriptor_s {
+    char *name;
+    char *filename;
+    int num_uses;
+    int num_routines;
+    struct use_descriptor_s (*uses)[];
+    struct routine_desriptor_s *routines[];
+};
+
+struct sub_ret_info_s {
+    struct routine_instance_s *ret_context;
+    void *ret_label;
+};
+
+struct fn_ret_info_s {
+    struct routine_instance_s *ret_context;
+    void *ret_label;
+    struct param_block_descriptor_s *param_descriptor; // ?? routine_desc ??
+};
+
+struct routine_instance_s {
+    struct routine_descriptor_s *descriptor;
+    void *global;                       // points to parent module instance
+    unsigned long flags;
+    unsigned long lineno;
+    struct sub_ret_info_s ret_pointer;
+};
+
+#define FLAG_RUNNING            0x01
+#define FLAG_PREPARED           0x02
+
