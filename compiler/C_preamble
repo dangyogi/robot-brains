@@ -6,7 +6,7 @@ struct routine_descriptor_s {
     int routine_offset;         // from start of module instance
     int num_param_blocks;
     // first param_block_descriptor is always positional parameters
-    struct param_block_descriptor_s *param_block_descriptors[];
+    struct param_block_descriptor_s *param_block_descriptors;
 };
 
 struct param_block_descriptor_s {
@@ -17,7 +17,7 @@ struct param_block_descriptor_s {
     int num_required_params;
     int defaults_size;          // bytes
     void *defaults_block;
-    int param_offsets[];        // from start of routine instance,
+    int *param_offsets;         // from start of routine instance,
                                 // indexed by parameter number (starting with 0)
 };
 
@@ -32,8 +32,8 @@ struct module_descriptor_s {
     char *filename;
     int num_uses;
     int num_routines;
-    struct use_descriptor_s (*uses)[];
-    struct routine_desriptor_s *routines[];
+    struct use_descriptor_s *uses;
+    struct routine_desriptor_s *routines;
 };
 
 struct sub_ret_info_s {

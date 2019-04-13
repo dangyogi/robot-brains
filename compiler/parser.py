@@ -225,7 +225,7 @@ def p_simple_statement1(p):
                      | RETURN primarys
                      | RETURN primarys kw_to primary
     """
-    p[0] = Statement(*p[1:])
+    p[0] = Statement(p.lineno(1), *p[1:])
 
 
 def p_simple_statement2(p):
@@ -233,14 +233,14 @@ def p_simple_statement2(p):
     simple_statement : primary arguments
                      | primary arguments RETURNING_TO primary
     """
-    p[0] = Call_statement(*p[1:])
+    p[0] = Call_statement(p.lineno(1), *p[1:])
 
 
 def p_simple_statement3(p):
     r"""
     simple_statement : primary OPEQ primary
     """
-    p[0] = Opeq_statement(p[1], p[2], p[3])
+    p[0] = Opeq_statement(p.lineno(1), p[1], p[2], p[3])
 
 
 def p_file(p):

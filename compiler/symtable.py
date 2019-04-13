@@ -262,6 +262,10 @@ class Labeled_block(With_parameters):
         super().dump_details(f)
         print(f" block {self.block}", end='', file=f)
 
+    def dump_contents(self, f, indent):
+        super().dump_contents(f, indent)
+        self.block.dump(f, indent)
+
     def gen_code(self, generator):
         generator.emit_label(self.code_name)
         self.block.gen_code(generator)
@@ -365,22 +369,31 @@ class Dummy_token:
 
 
 class Opmode(Namespace):
-    r'''self.modules_seen does not have lowered() keys.
-    '''
     def __init__(self, modules_seen=None):
         Namespace.__init__(self, Dummy_token(scanner.file_basename()))
         self.filename = scanner.filename()
 
         if modules_seen is not None:
+            # {module_name: module}
+            # ... does not have lowered() keys!
             self.modules_seen = modules_seen
 
     def set_in_namespace(self, no_prior_use):
         pass
 
-    def dump_details(self, f):
-        super().dump_details(f)
-        print(f" modules_seen: {','.join(self.modules_seen.keys())}",
-              end='', file=f)
+    #def dump_details(self, f):
+    #    super().dump_details(f)
+    #    print(f" modules_seen: {','.join(self.modules_seen.keys())}",
+    #          end='', file=f)
+
+    def dump_contents(self, f, indent):
+        super().dump_contents(f, indent)
+        if not isinstance(self, Module):
+            print(f"{indent_str(indent)}Modules:", file=f)
+            indent += 2
+            for name, module in self.modules_seen.items():
+                print(f"{indent_str(indent)}{name}:", file=f)
+                module.dump(f, indent + 2)
 
     def gen_program(self, generator):
         self.gen_prep(generator)
@@ -429,7 +442,8 @@ class Subroutine(Namespace, With_parameters):
 
     def dump_contents(self, f, indent):
         super().dump_contents(f, indent)
-        self.first_block.dump(f, indent)
+        if self.first_block is not None:
+            self.first_block.dump(f, indent)
 
     #def gen_prep(self, generator):
     #    self.gen_name = self.name.value
@@ -502,11 +516,13 @@ class Statement(Symtable):
         'return': ('return {}',),
     }
 
-    def __init__(self, *args):
+    def __init__(self, lineno, *args):
+        self.lineno = lineno
         self.args = args
 
     def dump_details(self, f):
         super().dump_details(f)
+        print(f" lineno {self.lineno}", end='', file=f)
         print(f" {self.args}", end='', file=f)
 
     def gen_code(self, generator, indent):

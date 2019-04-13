@@ -123,8 +123,10 @@ def gen_program(opmode):
         # This is modules, _not_ uses (instances)!
         # ... i.e., each of these may have multiple instances within the
         #           program.
-        modules = [opmode] + sorted(opmode.modules_seen.values(),
-                                    key=lambda m: m.name.value)
+        # These are in bottom-up order based on "uses".
+        modules = list(tsort_modules(opmode))
+        #print("modules", modules)
+
 
         def do(fn):
             ans = []
@@ -224,8 +226,8 @@ ret_struct_names = {
 }
 
 
-def gen_typedefs(parent):
-    for obj in parent.names.values():
+def gen_typedefs(module):
+    for obj in module.names.values():
         if isinstance(obj, symtable.Typedef):
             if obj.definition[0].value.upper() == 'FUNCTION':
                 if obj.definition[2]:
@@ -239,7 +241,7 @@ def gen_typedefs(parent):
                           ret_struct_names[obj.definition[0].value.upper()]
                     else:
                         print("gen_typedefs: creating new return type for",
-                              obj.name.value, "in", parent.name.value,
+                              obj.name.value, "in", module.name.value,
                               file=sys.stderr)
                         ret_struct = f"{obj.C_global_name}__ret_s"
                         emit_struct_start(ret_struct)
@@ -471,3 +473,38 @@ def convert_call_fn(fn, arguments):
     # FIX
     print("convert_call_fn", fn, arguments)
     return (), "call_fn", 100, 'nonassoc'
+
+
+def tsort_modules(opmode):
+    r'''Generates modules in bottom-up order according to "uses".
+
+    opmode.modules_seen is {name: module}.
+    '''
+    for name, m in opmode.modules_seen.items():
+        assert name == m.name.value
+
+    # {parent: set(children)}
+    order = dict(gen_dependencies(opmode.modules_seen))
+    #print("tsort_modules, order:", order)
+    for children in order.values():
+        for child in children:
+            assert child in order
+
+    while order:
+        leaves = frozenset(parent
+                           for parent, children in order.items()
+                            if not children)
+        for module in sorted(leaves, key=lambda m: m.name.value):
+            yield module
+            del order[module]
+        for children in order.values():
+            children -= leaves
+    yield opmode
+
+
+def gen_dependencies(modules_seen):
+    for m in modules_seen.values():
+        yield (m,
+               set(modules_seen[x.module_name.value]
+                   for x in m.names.values()
+                    if isinstance(x, symtable.Use)))
