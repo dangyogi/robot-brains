@@ -8,6 +8,20 @@ from functools import partial
 import symtable
 from scanner import syntax_error
 
+# 32-bit machine:
+#Sizeof_routine_instance_s = 24
+
+# 64-bit machine:
+Sizeof_routine_instance_s = 48
+Sizeof_long = 8
+Sizeof_double = 8
+Sizeof_ptr = 8
+Sizeof_bool = 1
+Align_long = 8
+Align_double = 8
+Align_ptr = 8
+Align_bool = 1
+
 
 Struct_indent = 0
 Struct_var_indent = 4
@@ -127,7 +141,6 @@ def gen_program(opmode):
         modules = list(tsort_modules(opmode))
         #print("modules", modules)
 
-
         def do(fn):
             ans = []
             for m in modules:
@@ -150,19 +163,39 @@ def gen_program(opmode):
             for line in preamble:
                 C_file.write(line)
 
-        print("gen_typedefs ....")
-        do(gen_typedefs)
         print("gen_descriptors ....")
+        print(file=C_file)
+        print(file=C_file)
+        print("// descriptors", file=C_file)
         do(gen_descriptors)
+        print(file=C_file)
+        print(file=C_file)
+        print("// structs", file=C_file)
+        print("gen_structs ....")
+        do(gen_structs)
 
-        print("gen_globals ....")
-        do(gen_globals)
+        print(file=C_file)
+        print(file=C_file)
+        print("// instances", file=C_file)
+        print("gen opmode instance ....")
+        gen_instance(opmode)
+        print("gen builtins instance ....")
+        gen_instance(opmode.modules_seen['builtins'])
+
         print("emit_code_start ....")
+        print(file=C_file)
+        print(file=C_file)
+        print("// code start", file=C_file)
         emit_code_start()
-        print("gen_start_labels ....")
-        do(gen_start_labels)
-        print("gen_init ....")
-        do(gen_init)
+        print(file=C_file)
+        print(file=C_file)
+        print("// call init routines", file=C_file)
+        emit_subroutine_call('builtins__module__init')
+        emit_subroutine_call(f'{opmode.name.value}__opmode__init')
+        print("write code ....")
+        print(file=C_file)
+        print(file=C_file)
+        print("// generated code", file=C_file)
         for line in lines:
             print(line, file=C_file)
         print("emit_code_end ....")
@@ -170,12 +203,12 @@ def gen_program(opmode):
 
 
 def assign_names(m):
-    if isinstance(m, symtable.Opmode):
-        m.C_global_name = translate_name(m.name.value)
-    else:
+    if isinstance(m, symtable.Module):
         m.C_global_name = \
           "__".join((os.path.basename(os.path.dirname(m.filename)),
-                     translate_name(m.name.value)))
+                     translate_name(m.name.value))) + "__module"
+    else:
+        m.C_global_name = translate_name(m.name.value) + "__opmode"
     assign_child_names(m)
 
 
@@ -226,43 +259,106 @@ ret_struct_names = {
 }
 
 
-def gen_typedefs(module):
-    for obj in module.names.values():
-        if isinstance(obj, symtable.Typedef):
-            if obj.definition[0].value.upper() == 'FUNCTION':
-                if obj.definition[2]:
-                    # explicit RETURNING clause
-                    if len(obj.definition[2]) <= 6 \
-                       and len(frozenset(r.value.upper()
-                                         for r in obj.definition[2])) == 1 \
-                       and obj.definition[0].value.upper() in ret_struct_names:
-                        # <= 6 return parameters, all same fundamental type
-                        ret_struct = \
-                          ret_struct_names[obj.definition[0].value.upper()]
-                    else:
-                        print("gen_typedefs: creating new return type for",
-                              obj.name.value, "in", module.name.value,
-                              file=sys.stderr)
-                        ret_struct = f"{obj.C_global_name}__ret_s"
-                        emit_struct_start(ret_struct)
-                        for i, t in enumerate(obj.definition[2], 1):
-                            emit_struct_variable(t, f"param_{i}")
-                        emit_struct_end()
-                else:
-                    # no explicit RETURNING clause, take return type from name
-                    ret_struct = ret_struct_names[obj.name.type.upper()]
-                ret_name = 'fn_ret_info'
-            else: # SUBROUTINE
-                ret_struct = 'sub_ret_s'
-                ret_name = 'sub_ret_info'
-            emit_struct_start(obj.C_global_name)
-            _emit_struct_variable(f"struct {ret_struct}", ret_name)
-            for i, t in enumerate(obj.definition[1], 1):
-                emit_struct_variable(t, f"param_{i}")
-            emit_struct_end()
-        elif isinstance(obj, symtable.Subroutine):
-            for child in obj.names.values():
-                gen_typedefs(child)
+def gen_descriptors(module):
+    routines = tuple(get_routines(module))
+    for r in routines:
+        gen_routine_descriptor(r)
+
+    # generate module descriptor
+    print(file=C_file)
+    print(f"struct module_descriptor_s {module.C_global_name} = {{",
+          file=C_file)
+    print(f'  "{module.name.value}",', file=C_file)
+    print(f'  "{module.filename}",', file=C_file)
+    uses = tuple(get_uses(module))
+    print(f'  {len(uses)}, // num_uses', file=C_file)
+    print(f'  {len(routines)}, // num_routines', file=C_file)
+    print('  (struct use_descriptor_s []){  // uses', file=C_file)
+    for u in uses:
+        print(f'    {{"{u.name.value}", 0}},', file=C_file)
+    print("  },", file=C_file)
+    print('  {  // routines', file=C_file)
+    for r in routines:
+        print(f'    &{r.C_global_name},', file=C_file)
+    print("  },", file=C_file)
+    print("};", file=C_file)
+
+
+def gen_routine_descriptor(routine):
+    print(file=C_file)
+    print(f"struct routine_descriptor_s {routine.C_global_name} = {{",
+          file=C_file)
+    print(f'  "{routine.name.value}",', file=C_file)
+    type = 'F' if isinstance(routine, symtable.Function) else 'S'
+    print(f"  '{type}',", file=C_file)
+    print(f'  {len(routine.kw_parameters) + 1},  '
+          '// num_param_block_descriptors', file=C_file)
+    print('  (struct param_block_descriptor_s []){  // param_block_descriptors',
+          file=C_file)
+    gen_param_desc(None, routine.pos_parameters)
+    for kw_name, kw_params in routine.kw_parameters.items():
+        gen_param_desc(kw_name, kw_params)
+    print("  },", file=C_file)
+    print("};", file=C_file)
+
+
+def gen_param_desc(param_name, params):
+    print('    {  // param_block_descriptor', file=C_file)
+    if param_name is None:
+        print('      NULL,  // name', file=C_file)
+    else:
+        print(f'      "{param_name}",  // name', file=C_file)
+    print(f'      {len(params)},  // num_params', file=C_file)
+    default_params = tuple(p for p in params
+                              if isinstance(p, symtable.Optional_parameter))
+    print(f'      {len(params) - len(default_params)},  // num_required_params',
+          file=C_file)
+    default_block = bytes()
+    offsets = []
+    current_offset = Sizeof_routine_instance_s
+    def append(t):
+        # FIX
+        pass
+    for p in default_params:
+        append(p)
+    print(f"      {len(default_block)},  // defaults_size", file=C_file)
+    print('      "', end='', file=C_file)
+    for i in range(len(default_block)):
+        print(strhex(default_block[i]), sep='', end='', file=C_file)
+    print('",  // defaults_block', file=C_file)
+    print("      (int []){", end='', file=C_file)
+    comma = ''
+    for i in range(len(default_block)):
+        print(comma, offsets[i], sep='', end='', file=C_file)
+        comma = ','
+    print("},  // param_offsets", file=C_file)
+    print('    },', file=C_file)
+
+
+def strhex(i):
+    h = hex(i)
+    return '\\' + h[1:]
+
+def get_uses(module):
+    for v in module.names.values():
+        if isinstance(v, symtable.Use):
+            yield v
+
+
+def get_routines(module):
+    for v in module.names.values():
+        if isinstance(v, symtable.Subroutine):
+            yield v
+
+
+def gen_structs(module):
+    # FIX
+    pass
+
+
+def gen_instance(module):
+    # FIX
+    pass
 
 
 def gen_code(m):
@@ -334,8 +430,9 @@ def gen_code(m):
 def gen_block(block):
     lines = []
     for s in block.statements:
+        lines.append(prepare_statement(
+                       f"current_routine->lineno = {s.lineno};"))
         # FIX
-        pass
     return lines
 
 
@@ -404,14 +501,21 @@ def emit_struct_end():
 
 def emit_code_start():
     print(file=C_file)
-    print("int main(int argc, char **argv, char **env) {", file=C_file)
-    print(symtable.indent_str(Label_indent), "void *current_module;",
-          sep='', file=C_file)
     print(file=C_file)
+    print("int", file=C_file)
+    print("main(int argc, char **argv, char **env) {", file=C_file)
+    print(symtable.indent_str(Label_indent),
+          "struct routine_instance_s *current_routine;",
+          sep='', file=C_file)
 
 
 def emit_code_end():
     print("}", file=C_file)
+
+
+def emit_subroutine_call(label_name):
+    # FIX
+    pass
 
 
 def prepare_label(name):
@@ -419,8 +523,11 @@ def prepare_label(name):
 
 
 def prepare_statements(statements):
-    return [f"{symtable.indent_str(Statement_indent)}{line}"
-            for line in statements]
+    return [prepare_statement(line) for line in statements]
+
+
+def prepare_statement(line):
+    return f"{symtable.indent_str(Statement_indent)}{line}"
 
 
 def gen_expr(expr):

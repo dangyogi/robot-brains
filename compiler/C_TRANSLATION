@@ -3,18 +3,19 @@ Descriptors:
 - routine_descriptor has:       // init outside of main (NULL for start_label)
   - char *name
   - char type                   // 'S' or 'F'
-  - void *start_label;          // set in routine init
-  - int routine_offset          // start of module instance to routine instance
   - int num_params_blocks
-  - param_block_descriptors[]
+  - param_block_descriptors *   // init outside of main
+  - void *start_label;          // set in routine init
+  - int routine_offset          // from start of module instance, routine init
 
 - param_block_descriptor has:   // init outside of main
   - char *name;                 // NULL for pos_params
-  - int param_block_offset;     // offset from context
-  - int default_param_offset;   // offset from context to first default param
-  - int defaults_size;          // sizeof defaults block
-  - void *defaults_block;
-  - int default_offsets[];      // indexed by num args passed
+  - int num_params;             // required and optional
+  - int num_required_params;
+  - int defaults_size;          // bytes
+  - void *defaults_block;       // initialized as &(struct param_block_s){...}
+  - int *param_offsets;         // indexed by num args passed
+                                // initialized as (int []){...}
 
 - use_descriptor has:
   - char *alias_name
@@ -25,18 +26,18 @@ Descriptors:
   - char *name
   - char *filename
   - int num_uses
-  - use_descriptor *uses[]
   - int num_routines
-  - routine_descriptor *routines[]
+  - use_descriptor *uses        // initialized as (use_descriptor []){{...}, }
+  - routine_descriptor *routines[] // initialized as {&routine_desc, ...}
 
 
 Instances:
 
 - label, sub_ret, fn_ret, sub and fn pointers have:
-  - void *context               // also serves as param_context
+  - struct routine_instance_s *context      // also serves as param_context
   - routine_descriptor *descriptor
 
-- struct context_s has:  // shared by all routine instances
+- struct routine_instance_s has:   // shared by all routine instances
   - routine_descriptor *descriptor // init outside of main
   - unsigned long flags            // initialized to 0 outside of main
   - module_instance *global        // constant set in routine init C fun
@@ -44,7 +45,7 @@ Instances:
   - ret pointer (above)
 
 - routine instance has:
-  - context_s
+  - routine_instance_s
   - parameters
   - locals
   - temps
@@ -65,9 +66,6 @@ Instances:
 SOURCE FILE LAYOUT:
 
 - built-in types
-- all typedefs
-  - modules before contained routines
-  - used modules before using modules
 - all descriptors
   - param_block_descriptors before their routine_descriptors
   - routine_descriptors before their module_descriptors
@@ -78,7 +76,7 @@ SOURCE FILE LAYOUT:
 - builtins declaration
 
 - "main"
-  - struct context_s *context;
+  - struct routine_instance_s *current_routine;
   - call builtin_init
   - call top-level opmode_init
   - code for each module (not instance)
