@@ -203,49 +203,58 @@ class Typedef(Entity):
         print(f" definition={self.definition}", end='', file=f)
 
 
-class With_parameters(Entity):
-    def __init__(self):
-        self.current_parameters = self.pos_parameters = []
-        self.kw_parameters = OrderedDict()
-        self.seen_default = False
+class Param_block(Symtable):
+    def __init__(self, name="__pos__"):
+        self.name = name
+        self.required_params = []
+        self.optional_params = []
 
-    def pos_parameter(self, param):
-        if isinstance(param, Required_parameter):
-            if self.seen_default:
+    def dump(self, f, indent=0):
+        print(indent_str(indent), self.name, " Parameters:", sep='', file=f)
+        for p in self.required_params:
+            p.dump(f, indent+2)
+        for p in self.optional_params:
+            p.dump(f, indent+2)
+
+    def add_parameter(self, param):
+        if isinstance(param, Optional_parameter):
+            param.param_pos_number = \
+              len(self.required_params) + len(self.optional_params)
+            self.optional_params.append(param)
+        else:
+            if self.optional_params:
                 scanner.syntax_error("Required parameter may not follow "
                                      "default parameter",
-                                     ident.lexpos,
-                                     ident.lineno)
-        else:
-            self.seen_default = True
-        param.param_pos_number = len(self.current_parameters)
-        self.current_parameters.append(param)
+                                     param.name.lexpos, param.name.lineno)
+            param.param_pos_number = len(self.required_params)
+            self.required_params.append(param)
+
+
+class With_parameters(Entity):
+    def __init__(self):
+        self.pos_param_block = None
+        self.kw_parameters = OrderedDict()      # {lname: Param_block}
+
+    def pos_parameter(self, param):
+        if self.pos_param_block is None:
+            self.pos_param_block = Param_block()
+            self.current_param_block = self.pos_param_block
+        self.current_param_block.add_parameter(param)
 
     def kw_parameter(self, keyword):
         lname = keyword.value.lower()
         if lname in self.kw_parameters:
             scanner.syntax_error("Duplicate keyword",
                                  keyword.lexpos, keyword.lineno)
-        self.current_parameters = self.kw_parameters[lname] = []
-        self.seen_default = False
+        self.current_param_block = self.kw_parameters[lname] \
+          = Param_block(keyword.value)
 
-    def prepare(self, opmode):
-        #print("With_parameters.prepare", self.__class__.__name__, self.name)
-        super().prepare(opmode)
-        self.num_pos_defaults = sum(1 for p in self.pos_parameters
-                                      if isinstance(p, Optional_parameter))
-        self.num_kw_defaults = {kw: sum(1 for p in params
-                                          if isinstance(p, Optional_parameter))
-                                for kw, params in self.kw_parameters.items()}
-        self.no_kw_defaults = not any(num
-                                      for num in self.num_kw_defaults.values())
-
-    def dump_details(self, f):
-        super().dump_details(f)
-        print(f" pos_params {self.pos_parameters}"
-                f" kw_params {self.kw_parameters.items()}",
-              end='',
-              file=f)
+    def dump_contents(self, f, indent):
+        if self.pos_param_block is not None:
+            self.pos_param_block.dump(f, indent)
+        for pb in self.kw_parameters.values():
+            pb.dump(f, indent)
+        super().dump_contents(f)
 
 
 class Labeled_block(With_parameters):
@@ -418,7 +427,6 @@ class Module(Opmode, With_parameters):
 
 class Subroutine(Namespace, With_parameters):
     struct_name_suffix = "_sub"
-    dlt_mask_needed = False
     first_block = None
 
     def __init__(self, ident):

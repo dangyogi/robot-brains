@@ -163,16 +163,17 @@ def gen_program(opmode):
             for line in preamble:
                 C_file.write(line)
 
-        print("gen_descriptors ....")
-        print(file=C_file)
-        print(file=C_file)
-        print("// descriptors", file=C_file)
-        do(gen_descriptors)
         print(file=C_file)
         print(file=C_file)
         print("// structs", file=C_file)
         print("gen_structs ....")
         do(gen_structs)
+
+        print("gen_descriptors ....")
+        print(file=C_file)
+        print(file=C_file)
+        print("// descriptors", file=C_file)
+        do(gen_descriptors)
 
         print(file=C_file)
         print(file=C_file)
@@ -187,17 +188,20 @@ def gen_program(opmode):
         print(file=C_file)
         print("// code start", file=C_file)
         emit_code_start()
+
         print(file=C_file)
         print(file=C_file)
         print("// call init routines", file=C_file)
         emit_subroutine_call('builtins__module__init')
         emit_subroutine_call(f'{opmode.name.value}__opmode__init')
+
         print("write code ....")
         print(file=C_file)
         print(file=C_file)
         print("// generated code", file=C_file)
         for line in lines:
             print(line, file=C_file)
+
         print("emit_code_end ....")
         emit_code_end()
 
@@ -209,6 +213,9 @@ def assign_names(m):
                      translate_name(m.name.value))) + "__module"
     else:
         m.C_global_name = translate_name(m.name.value) + "__opmode"
+    m.C_descriptor_name = m.C_global_name + "__desc"
+    m.C_struct_name = m.C_global_name + "__instance_s"
+    m.C_init_subroutine_name = m.C_global_name + "__init__"
     assign_child_names(m)
 
 
@@ -232,7 +239,11 @@ def assign_child_names(parent):
         elif isinstance(obj, symtable.Subroutine):
             obj.C_local_name = translate_name(obj.name.value)
             obj.C_global_name = parent.C_global_name + "__" + obj.C_local_name
+            obj.C_start_label_name = obj.C_global_name + "__start"
+            obj.C_struct_name = obj.C_global_name + "__instance_s"
+            obj.C_descriptor_name = obj.C_global_name + "__desc"
             obj.C_temps = []  # [(type, name)]
+            obj.needs_dlt_mask = False
             assign_child_names(obj)
         else:
             # This seems to only be References
@@ -240,6 +251,23 @@ def assign_child_names(parent):
                 print("assign_child_names: ignoring",
                       obj.__class__.__name__, obj.name.value, "in",
                       parent.__class__.__name__, parent.name.value)
+
+    if not isinstance(parent, symtable.Opmode):
+        if parent.pos_param_block is not None:
+            assign_param_names(parent, parent.pos_param_block)
+        for pb in parent.kw_parameters.values():
+            assign_param_names(parent, pb)
+
+
+def assign_param_names(parent, param_block):
+    if param_block.optional_params:
+        param_block.optional_param_block_struct_name = \
+          parent.C_global_name + "__" + param_block.name
+        param_block.optional_param_block_name = \
+          parent.C_local_name + "__" + param_block.name + "__optionals"
+        for p in param_block.optional_params:
+            p.C_local_name = \
+              f"{param_block.optional_param_block_name}.{p.C_local_name}"
 
 
 def translate_name(name):
@@ -291,53 +319,53 @@ def gen_routine_descriptor(routine):
     print(f'  "{routine.name.value}",', file=C_file)
     type = 'F' if isinstance(routine, symtable.Function) else 'S'
     print(f"  '{type}',", file=C_file)
-    print(f'  {len(routine.kw_parameters) + 1},  '
-          '// num_param_block_descriptors', file=C_file)
+    if routine.pos_param_block is None:
+        num_param_blocks = 0
+    else:
+        num_param_blocks = 1
+    print(f'  {num_param_blocks},  // num_param_blocks', file=C_file)
     print('  (struct param_block_descriptor_s []){  // param_block_descriptors',
           file=C_file)
-    gen_param_desc(None, routine.pos_parameters)
-    for kw_name, kw_params in routine.kw_parameters.items():
-        gen_param_desc(kw_name, kw_params)
+    if routine.pos_param_block is not None:
+        gen_param_desc(routine.pos_param_block)
+    for kw_params in routine.kw_parameters.values():
+        gen_param_desc(kw_params)
     print("  },", file=C_file)
     print("};", file=C_file)
 
 
-def gen_param_desc(param_name, params):
+def gen_param_desc(param_block):
     print('    {  // param_block_descriptor', file=C_file)
-    if param_name is None:
-        print('      NULL,  // name', file=C_file)
-    else:
-        print(f'      "{param_name}",  // name', file=C_file)
-    print(f'      {len(params)},  // num_params', file=C_file)
-    default_params = tuple(p for p in params
-                              if isinstance(p, symtable.Optional_parameter))
-    print(f'      {len(params) - len(default_params)},  // num_required_params',
+    print(f'      "{param_block.name}",  // name', file=C_file)
+    num_params = len(param_block.required_params) \
+               + len(param_block.optional_params)
+    print(f'      {num_params},  // num_params', file=C_file)
+    print(f'      {len(param_block.required_params)},  // num_required_params',
           file=C_file)
-    default_block = bytes()
     offsets = []
-    current_offset = Sizeof_routine_instance_s
-    def append(t):
-        # FIX
-        pass
-    for p in default_params:
-        append(p)
-    print(f"      {len(default_block)},  // defaults_size", file=C_file)
-    print('      "', end='', file=C_file)
-    for i in range(len(default_block)):
-        print(strhex(default_block[i]), sep='', end='', file=C_file)
-    print('",  // defaults_block', file=C_file)
-    print("      (int []){", end='', file=C_file)
-    comma = ''
-    for i in range(len(default_block)):
-        print(comma, offsets[i], sep='', end='', file=C_file)
-        comma = ','
-    print("},  // param_offsets", file=C_file)
+    # FIX add required_param offsets
+    if not param_block.optional_params:
+        print(f'      0,  // defaults_size', file=C_file)
+        print(f'      NULL,  // defaults_block', file=C_file)
+    else:
+        print(f'      sizeof(struct {param_block.optional_param_block_struct_name})'
+              ',  // defaults_size',
+              file=C_file)
+        default_block = []
+        current_offset = Sizeof_routine_instance_s
+        def append(t):
+            # FIX
+            pass
+        for p in default_params:
+            append(p)
+        print(f'      &(struct {param_block.optional_param_block_struct_name})'
+              f'{{{", ".join(default_block)}}},  // defaults_block',
+              file=C_file)
+    print(f'      (int []){{{", ".join(str(i) for i in offsets)}}},'
+          '  // param_offsets',
+          file=C_file)
     print('    },', file=C_file)
 
-
-def strhex(i):
-    h = hex(i)
-    return '\\' + h[1:]
 
 def get_uses(module):
     for v in module.names.values():
@@ -352,8 +380,57 @@ def get_routines(module):
 
 
 def gen_structs(module):
-    # FIX
-    pass
+    for sub in get_routines(module):
+        gen_routine_struct(sub)
+
+    emit_struct_start(module.C_struct_name)
+    _emit_struct_variable("struct module_descriptor_s *", 'descriptor')
+    for obj in module.names.values():
+        if isinstance(obj, symtable.Use):
+            _emit_struct_variable(f"struct {obj.module.C_struct_name} ",
+                                  obj.C_local_name)
+        elif isinstance(obj, symtable.Variable):
+            emit_struct_variable(obj.type, obj.C_local_name, obj.dim)
+        elif isinstance(obj, symtable.Subroutine):
+            _emit_struct_variable(f"struct {obj.C_struct_name}",
+                                  obj.C_local_name)
+    emit_struct_end()
+
+
+def gen_routine_struct(routine):
+    emit_struct_start(routine.C_struct_name)
+    _emit_struct_variable("struct routine_instance_s", '__base__')
+    emit_param_blocks(routine)
+    for obj in routine.names.values():
+        if isinstance(obj, symtable.Required_parameter):
+            # skip, handled by emit_param_blocks...
+            # FIX, we need to allow multiple labels to declare the same params!
+            pass
+        elif isinstance(obj, symtable.Variable):
+            emit_struct_variable(obj.type, obj.C_local_name, obj.dim)
+        elif isinstance(obj, symtable.Labeled_block):
+            emit_param_blocks(obj)
+    for type, name in routine.C_temps:
+        emit_struct_variable(type, name)
+    if routine.needs_dlt_mask:
+        _emit_struct_variable('unsigned long', 'dlt_mask')
+    emit_struct_end()
+
+
+def emit_param_blocks(obj):
+    if obj.pos_param_block is not None:
+        emit_param_block(obj.pos_param_block)
+    for pb in obj.kw_parameters.values():
+        emit_param_block(pb)
+
+
+def emit_param_block(pb):
+    for p in pb.required_params:
+        emit_struct_variable(p.type, p.C_local_name, p.dim)
+    if pb.optional_params:
+        _emit_struct_variable(
+          f"struct {pb.optional_param_block_struct_name }", 
+          pb.optional_param_block_name)
 
 
 def gen_instance(module):
@@ -363,67 +440,43 @@ def gen_instance(module):
 
 def gen_code(m):
     lines = []
-    for sub in m.names.values():
-        if isinstance(sub, symtable.Subroutine):
 
-            def gen_label(label):
-                lines.append('')
-                lines.append(prepare_label(label))
-                return label
+    def gen_label(label):
+        lines.append('')
+        lines.append(prepare_label(label))
+        return label
 
-            def gen_init_defaults(parameters, num_defaults, label_format):
-                # generate start labels and default code:
-                num_req_params = len(parameters) - num_defaults
-                labels = ['too_few_arguments' * num_req_params]
-                for i in range(num_req_params, len(parameters)):
-                    labels.append(gen_label(label_format.format(i)))
-                    # gen default code
-                    statements, C_expr, _, _ = gen_expr(parameters[i][1])
-                    lines.extend(prepare_statements(statements))
-                    lvalue = gen_lvalue(parameters[i][0])[1]
-                    lines.extend(prepare_statements([f"{lvalue} = {C_expr};"]))
-                return labels
+    def gen_statement(line):
+        lines.append(prepare_statement(line))
 
-            # generate start labels and pos defaults:
-            label_format = f"{sub.C_global_name}_start_{{}}"
-            sub.start_labels = \
-              gen_init_defaults(sub.pos_parameters, sub.num_pos_defaults,
-                                label_format)
-            if sub.no_kw_defaults:
-                # This final label will fall-through to the subroutine code
-                sub.start_labels.append(
-                  gen_label(label_format.format(len(sub.pos_parameters))))
-            else:
-                need_return = bool(sub.num_pos_defaults)
-                # generate keyword defaults.  The last of these will
-                # fall-through to the subroutine code.
-                sub.kw_labels = {}  # {kw: [labels]}
-                                    # excludes labels[num_params] --
-                                    #    no defaults left to initialize!
-                for kw, params in self.kw_parameters.items():
-                    if need_return:
-                        gen_sub_return(sub)
-                    sub.kw_labels[kw] = gen_init_defaults(
-                      params,
-                      sub.num_kw_defaults[kw],
-                      f"{sub.C_global_name}_kw_param_init_{{}}")
-                    need_return = bool(sub.num_kw_defaults[kw])
+    def gen_call(label):
+        # FIX: complete this...
+        gen_statement(f"goto {label};")
 
-            if sub.first_block:
-                lines.extend(gen_block(sub.first_block))
-            for labeled_block in sub.names.values():
-                if isinstance(labeled_block, symtable.Labeled_block):
-                    if labeled_block.seen_default:
-                        syntax_error("default parameters on labels not yet "
-                                       "implemented",
-                                     labeled_block.name.lexpos,
-                                     labeled_block.name.lineno,
-                                     labeled_block.name.filename,
-                                     labeled_block.name.namespace)
-                    for param in labeled_block.pos_parameters:
-                        # FIX
-                        pass
-                    lines.extend(gen_block(labeled_block.block))
+    gen_label(m.C_init_subroutine_name)
+
+    for use in get_uses(m):
+        gen_call(use.module.C_init_subroutine_name)
+
+    for sub in get_routines(m):
+        gen_statement(
+          f'{sub.C_local_name}.__base__.descriptor = &{sub.C_descriptor_name};')
+        gen_statement(f'{sub.C_local_name}.__base__.flags = 0;')
+        gen_statement(
+          f'{sub.C_local_name}.__base__.global = &module_instance;')
+
+    for sub in get_routines(m):
+        gen_label(sub.C_start_label_name)
+
+        # generate start labels and pos defaults:
+
+        if sub.first_block:
+            lines.extend(gen_block(sub.first_block))
+        for labeled_block in sub.names.values():
+            if isinstance(labeled_block, symtable.Labeled_block):
+                gen_label(labeled_block.C_global_name)
+                lines.extend(gen_block(labeled_block.block))
+
     return lines
 
 
@@ -453,8 +506,8 @@ def gen_globals(m):
             for var in obj.names.values():
                 if isinstance(var, symtable.Variable) and var.assignment_seen:
                     emit_struct_variable(var.type, var.C_local_name)
-            if obj.dlt_mask_needed:
-                _emit_struct_variable('unsigned long', 'dlt_mask')
+            #if obj. ....dlt_mask_needed:
+            #    _emit_struct_variable('unsigned long', 'dlt_mask')
             for t, n in obj.C_temps:
                 _emit_struct_variable(t, n)
             emit_struct_end()
@@ -465,37 +518,24 @@ def gen_globals(m):
 
 
 def emit_struct_start(name):
-    global struct_temps, struct_seen_dlt_mask
     print(file=C_file)
     print(symtable.indent_str(Struct_indent), f"struct {name} {{",
           sep='', file=C_file)
-    struct_temps = []
-    struct_seen_dlt_mask = False
-    return f"struct {name}"
 
 
 def emit_struct_variable(type, name, dim=None):
     _emit_struct_variable(types[type], name, dim)
 
 
-def emit_struct_sub_ret_info():
-    _emit_struct_variable("struct sub_ret_s", "sub_ret_info")
-
-
-def emit_struct_fn_ret_info():
-    _emit_struct_variable("struct fn_ret_s", "fn_ret_info")
-
-
-def emit_struct_dlt_mask():
-    global struct_seen_dlt_mask
-    struct_seen_dlt_mask = True
+def _emit_struct_variable(type, name, dim=None):
+    print(symtable.indent_str(Struct_var_indent), type,
+          sep='', end='', file=C_file)
+    if not type.endswith('*'):
+        print(' ', end='', file=C_file)
+    print(f"{name};", file=C_file)
 
 
 def emit_struct_end():
-    for type, name in struct_temps:
-        emit_struct_variable(type, name)
-    if struct_seen_dlt_mask:
-        _emit_struct_variable('unsigned long', 'dlt_mask')
     print(symtable.indent_str(Struct_indent), "};", sep='', file=C_file)
 
 

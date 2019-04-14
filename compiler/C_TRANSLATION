@@ -9,7 +9,7 @@ Descriptors:
   - int routine_offset          // from start of module instance, routine init
 
 - param_block_descriptor has:   // init outside of main
-  - char *name;                 // NULL for pos_params
+  - char *name;                 // "__pos__" for pos_params
   - int num_params;             // required and optional
   - int num_required_params;
   - int defaults_size;          // bytes
@@ -66,19 +66,22 @@ Instances:
 SOURCE FILE LAYOUT:
 
 - built-in types
-- all descriptors
-  - param_block_descriptors before their routine_descriptors
-  - routine_descriptors before their module_descriptors
 - all struct definitions
   - routine instance structs before their module_structs
   - used module instance structs before using module instance structs
+- all descriptors
+  - param_block_descriptors before their routine_descriptors
+  - routine_descriptors before their module_descriptors
 - top-level opmode instance declaration
 - builtins declaration
 
 - "main"
   - struct routine_instance_s *current_routine;
+  - init descriptors
   - call builtin_init
   - call top-level opmode_init
+  - call cycle.run
+  - return 0
   - code for each module (not instance)
     - module init code
       - initialize module parameters/variables
