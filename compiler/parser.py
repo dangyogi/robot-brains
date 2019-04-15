@@ -504,6 +504,7 @@ def _find_module(name, path):
         full_name = os.path.join(p, name + '.module')
         #print("_find_module", name, "checking", full_name)
         if os.path.isfile(full_name):
+            #print("_find_module", name, "found", full_name)
             return full_name
     #print("_find_module:", name, "not found")
     return None

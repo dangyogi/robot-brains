@@ -8,20 +8,6 @@ from functools import partial
 import symtable
 from scanner import syntax_error
 
-# 32-bit machine:
-#Sizeof_routine_instance_s = 24
-
-# 64-bit machine:
-Sizeof_routine_instance_s = 48
-Sizeof_long = 8
-Sizeof_double = 8
-Sizeof_ptr = 8
-Sizeof_bool = 1
-Align_long = 8
-Align_double = 8
-Align_ptr = 8
-Align_bool = 1
-
 
 Struct_indent = 0
 Struct_var_indent = 4
@@ -46,6 +32,42 @@ precedence = (  # highest to lowest
     ('right', '=', '*=', '/=', '%=', '-=', '&=', '^=', '|=', '<<=', '>>='),
     ('left', ','),
 )
+
+
+C_reserved_words = frozenset((
+    'auto',
+    'break',
+    'case',
+    'char',
+    'const',
+    'continue',
+    'default',
+    'do',
+    'double',
+    'else',
+    'enum',
+    'extern',
+    'float',
+    'for',
+    'goto',
+    'if',
+    'int',
+    'long',
+    'register',
+    'return',
+    'short',
+    'signed',
+    'sizeof',
+    'static',
+    'struct',
+    'switch',
+    'typedef',
+    'union',
+    'unsigned',
+    'void',
+    'volatile',
+    'while',
+))
 
 
 def parse_precedence(precedence):
@@ -216,6 +238,7 @@ def gen_program(opmode):
         print(file=C_file)
         print(file=C_file)
         print("// call cycle run", file=C_file)
+        print(file=C_file)
 
         # find "cycle" module (look in opmode and builtins):
         for use in get_uses(opmode):
@@ -255,13 +278,15 @@ def gen_program(opmode):
             sys.exit(1)
 
         print(prepare_statement(
-                f"{run_routine_name}.ret_pointer.ret_context = current_routine;"),
+                f"{run_routine_name}.__base__.ret_pointer.ret_context = "
+                "current_routine;"),
               file=C_file)
         print(prepare_statement(
-                f"{run_routine_name}.ret_pointer.descriptor = FIX;"),
+                f"{run_routine_name}.__base__.ret_pointer.descriptor = FIX;"),
               file=C_file)
         print(prepare_statement(
-                f"current_routine = &{run_routine_name};"),
+                "current_routine = "
+                f"(struct routine_instance_s *)&{run_routine_name};"),
               file=C_file)
         print(prepare_statement(
                 f"goto {run_routine.C_start_label_name};"),
@@ -304,6 +329,7 @@ def assign_child_names(parent):
     for obj in parent.names.values():
         if isinstance(obj, symtable.Variable):
             # name defined inside namespace struct
+            obj.C_type = translate_type(obj.type)
             if obj.assignment_seen:
                 obj.C_local_name = translate_name(obj.name.value)
         elif isinstance(obj, symtable.Use):
@@ -354,6 +380,8 @@ def assign_param_names(parent, param_block):
 def translate_name(name):
     if not name[-1].isdecimal() and not name[-1].isalpha():
         return name[:-1].lower() + '_'
+    if name.lower() in C_reserved_words:
+        return name.lower() + '_'
     return name.lower()
 
 
@@ -375,7 +403,7 @@ def gen_descriptors(module):
 
     # generate module descriptor
     print(file=C_file)
-    print(f"struct module_descriptor_s {module.C_global_name} = {{",
+    print(f"struct module_descriptor_s {module.C_descriptor_name} = {{",
           file=C_file)
     print(f'  "{module.name.value}",', file=C_file)
     print(f'  "{module.filename}",', file=C_file)
@@ -385,12 +413,12 @@ def gen_descriptors(module):
     print('  (struct use_descriptor_s []){  // uses', file=C_file)
     for u in uses:
         print(f'    {{"{u.name.value}", '
-                f'offsetof({module.C_struct_name}, {u.C_local_name})}},',
+                f'offsetof(struct {module.C_struct_name}, {u.C_local_name})}},',
               file=C_file)
     print("  },", file=C_file)
     print('  {  // routines', file=C_file)
     for r in routines:
-        print(f'    &{r.C_global_name},', file=C_file)
+        print(f'    &{r.C_descriptor_name},', file=C_file)
     print("  },", file=C_file)
     print("};", file=C_file)
 
@@ -414,7 +442,7 @@ def gen_routine_descriptor(module, routine):
     for kw_params in routine.kw_parameters.values():
         gen_param_desc(routine, kw_params)
     print("  },", file=C_file)
-    print(f'  offsetof({module.C_struct_name}, {routine.C_local_name}),'
+    print(f'  offsetof(struct {module.C_struct_name}, {routine.C_local_name}),'
             '  // routine_offset',
           file=C_file)
     print("};", file=C_file)
@@ -433,7 +461,8 @@ def gen_param_desc(routine, param_block):
 
     # add offsets to required_params
     for p in param_block.required_params:
-        offsets.append(f"offsetof({routine.C_struct_name}, {p.C_local_name})")
+        offsets.append(f"offsetof(struct {routine.C_struct_name}, "
+                       f"{p.C_local_name})")
 
     # build default_block and offsets for optional_params
     if not param_block.optional_params:
@@ -447,7 +476,7 @@ def gen_param_desc(routine, param_block):
         current_offset = Sizeof_routine_instance_s
         def append(t):
             # FIX add default_block info
-            offsets.append(f"offsetof({routine.C_struct_name}, "
+            offsets.append(f"offsetof(struct {routine.C_struct_name}, "
                            f"{p.C_local_name})")
         for p in default_params:
             append(p)
@@ -517,15 +546,13 @@ def gen_init_fns(module):
           '(struct ', module.C_struct_name, ' *module_instance',
           sep='', end='', file=C_file)
     if isinstance(module, symtable.Module):
-        comma = ''
         def gen_params(pb):
-            nonlocal comma
             for p in pb.required_params:
-                print(comma, p.C_local_name, sep='', end='', file=C_file)
-                comma = ', '
+                print(', ', p.C_type, ' ', p.C_local_name,
+                      sep='', end='', file=C_file)
             for p in pb.optional_params:
-                print(comma, p.C_local_name, sep='', end='', file=C_file)
-                comma = ', '
+                print(', ', p.C_type, ' ', p.C_local_name,
+                      sep='', end='', file=C_file)
 
         pb = module.pos_param_block
         if pb is not None:
@@ -537,7 +564,7 @@ def gen_init_fns(module):
     # FIX: Init module params/variables
 
     for use in get_uses(module):
-        gen_module_init_call('module_instance', use)
+        gen_module_init_call(use)
 
     for sub in get_routines(module):
         gen_statement(
@@ -560,10 +587,10 @@ def init_descriptors(module):
               file=C_file)
 
 
-def gen_module_init_call(parent_module_instance, use):
+def gen_module_init_call(use):
     print(file=C_file)
     print(prepare_statement(f"{use.module.C_init_C_fn_name}("
-                            f"${parent_module_instance}.{use.C_local_name}"),
+                            f"&module_instance->{use.C_local_name}"),
           end='', file=C_file)
     # FIX: Pass module args
     print(');', file=C_file)
