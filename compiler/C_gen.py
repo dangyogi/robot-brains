@@ -175,13 +175,20 @@ def gen_program(opmode):
         print("// descriptors", file=C_file)
         do(gen_descriptors)
 
+        print("gen_init_fns ....")
+        print(file=C_file)
+        print(file=C_file)
+        print("// init_fns", file=C_file)
+        do(gen_init_fns)
+
         print(file=C_file)
         print(file=C_file)
         print("// instances", file=C_file)
         print("gen opmode instance ....")
         gen_instance(opmode)
         print("gen builtins instance ....")
-        gen_instance(opmode.modules_seen['builtins'])
+        builtins_module = opmode.modules_seen['builtins']
+        gen_instance(builtins_module)
 
         print("emit_code_start ....")
         print(file=C_file)
@@ -191,9 +198,83 @@ def gen_program(opmode):
 
         print(file=C_file)
         print(file=C_file)
+        print("// init descriptors", file=C_file)
+        do(init_descriptors)
+
+        print(file=C_file)
+        print(file=C_file)
         print("// call init routines", file=C_file)
-        emit_subroutine_call('builtins__module__init')
-        emit_subroutine_call(f'{opmode.name.value}__opmode__init')
+        print(file=C_file)
+        print(prepare_statement(f"{builtins_module.C_init_C_fn_name}("
+                                f"&{builtins_module.C_global_name});"),
+              file=C_file)
+        print(file=C_file)
+        print(prepare_statement(f"{opmode.C_init_C_fn_name}("
+                                f"&{opmode.C_global_name});"),
+              file=C_file)
+
+        print(file=C_file)
+        print(file=C_file)
+        print("// call cycle run", file=C_file)
+
+        # find "cycle" module (look in opmode and builtins):
+        for use in get_uses(opmode):
+            if use.name.value.lower() == 'cycle':
+                cycle_module = use.module
+                cycle_module_name = f'{opmode.C_global_name}.{use.C_local_name}'
+                break
+        else:
+            for use in get_uses(builtins_module):
+                if use.name.value.lower() == 'cycle':
+                    cycle_module = use.module
+                    cycle_module_name = \
+                      f'{builtins_module.C_global_name}.{use.C_local_name}'
+                    break
+            else:
+                print("could not find cycle module for cycle.run call",
+                      file=sys.stderr)
+                sys.exit(1)
+
+        # find "run" subroutine:
+        for routine in get_routines(cycle_module):
+            if routine.name.value.lower() == 'run':
+                if isinstance(routine, symtable.Function):
+                    print('cycle.run must be a subroutine, not a function',
+                          file=sys.stderr)
+                    sys.exit(1)
+                if routine.pos_param_block is not None or routine.kw_parameters:
+                    print('cycle.run must not take any parameters',
+                          file=sys.stderr)
+                    sys.exit(1)
+                run_routine = routine
+                run_routine_name = f"{cycle_module_name}.{routine.C_local_name}"
+                break
+        else:
+            print('cycle module does not have a "run" subroutine',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        print(prepare_statement(
+                f"{run_routine_name}.ret_pointer.ret_context = current_routine;"),
+              file=C_file)
+        print(prepare_statement(
+                f"{run_routine_name}.ret_pointer.descriptor = FIX;"),
+              file=C_file)
+        print(prepare_statement(
+                f"current_routine = &{run_routine_name};"),
+              file=C_file)
+        print(prepare_statement(
+                f"goto {run_routine.C_start_label_name};"),
+              file=C_file)
+
+
+        print(file=C_file)
+        print(file=C_file)
+        print("// all done!", file=C_file)
+        print(file=C_file)
+        print(prepare_label("terminate_program_0"), file=C_file)
+        print(prepare_statement("return 0;"), file=C_file)
+
 
         print("write code ....")
         print(file=C_file)
@@ -215,7 +296,7 @@ def assign_names(m):
         m.C_global_name = translate_name(m.name.value) + "__opmode"
     m.C_descriptor_name = m.C_global_name + "__desc"
     m.C_struct_name = m.C_global_name + "__instance_s"
-    m.C_init_subroutine_name = m.C_global_name + "__init__"
+    m.C_init_C_fn_name = m.C_global_name + "__init__"
     assign_child_names(m)
 
 
@@ -290,7 +371,7 @@ ret_struct_names = {
 def gen_descriptors(module):
     routines = tuple(get_routines(module))
     for r in routines:
-        gen_routine_descriptor(r)
+        gen_routine_descriptor(module, r)
 
     # generate module descriptor
     print(file=C_file)
@@ -303,7 +384,9 @@ def gen_descriptors(module):
     print(f'  {len(routines)}, // num_routines', file=C_file)
     print('  (struct use_descriptor_s []){  // uses', file=C_file)
     for u in uses:
-        print(f'    {{"{u.name.value}", 0}},', file=C_file)
+        print(f'    {{"{u.name.value}", '
+                f'offsetof({module.C_struct_name}, {u.C_local_name})}},',
+              file=C_file)
     print("  },", file=C_file)
     print('  {  // routines', file=C_file)
     for r in routines:
@@ -312,9 +395,9 @@ def gen_descriptors(module):
     print("};", file=C_file)
 
 
-def gen_routine_descriptor(routine):
+def gen_routine_descriptor(module, routine):
     print(file=C_file)
-    print(f"struct routine_descriptor_s {routine.C_global_name} = {{",
+    print(f"struct routine_descriptor_s {routine.C_descriptor_name} = {{",
           file=C_file)
     print(f'  "{routine.name.value}",', file=C_file)
     type = 'F' if isinstance(routine, symtable.Function) else 'S'
@@ -327,14 +410,17 @@ def gen_routine_descriptor(routine):
     print('  (struct param_block_descriptor_s []){  // param_block_descriptors',
           file=C_file)
     if routine.pos_param_block is not None:
-        gen_param_desc(routine.pos_param_block)
+        gen_param_desc(routine, routine.pos_param_block)
     for kw_params in routine.kw_parameters.values():
-        gen_param_desc(kw_params)
+        gen_param_desc(routine, kw_params)
     print("  },", file=C_file)
+    print(f'  offsetof({module.C_struct_name}, {routine.C_local_name}),'
+            '  // routine_offset',
+          file=C_file)
     print("};", file=C_file)
 
 
-def gen_param_desc(param_block):
+def gen_param_desc(routine, param_block):
     print('    {  // param_block_descriptor', file=C_file)
     print(f'      "{param_block.name}",  // name', file=C_file)
     num_params = len(param_block.required_params) \
@@ -342,8 +428,14 @@ def gen_param_desc(param_block):
     print(f'      {num_params},  // num_params', file=C_file)
     print(f'      {len(param_block.required_params)},  // num_required_params',
           file=C_file)
+
     offsets = []
-    # FIX add required_param offsets
+
+    # add offsets to required_params
+    for p in param_block.required_params:
+        offsets.append(f"offsetof({routine.C_struct_name}, {p.C_local_name})")
+
+    # build default_block and offsets for optional_params
     if not param_block.optional_params:
         print(f'      0,  // defaults_size', file=C_file)
         print(f'      NULL,  // defaults_block', file=C_file)
@@ -354,14 +446,15 @@ def gen_param_desc(param_block):
         default_block = []
         current_offset = Sizeof_routine_instance_s
         def append(t):
-            # FIX
-            pass
+            # FIX add default_block info
+            offsets.append(f"offsetof({routine.C_struct_name}, "
+                           f"{p.C_local_name})")
         for p in default_params:
             append(p)
         print(f'      &(struct {param_block.optional_param_block_struct_name})'
               f'{{{", ".join(default_block)}}},  // defaults_block',
               file=C_file)
-    print(f'      (int []){{{", ".join(str(i) for i in offsets)}}},'
+    print(f'      (int []){{{", ".join(offsets)}}},'
           '  // param_offsets',
           file=C_file)
     print('    },', file=C_file)
@@ -417,6 +510,65 @@ def gen_routine_struct(routine):
     emit_struct_end()
 
 
+def gen_init_fns(module):
+    print(file=C_file)
+    print("void", file=C_file)
+    print(module.C_init_C_fn_name,
+          '(struct ', module.C_struct_name, ' *module_instance',
+          sep='', end='', file=C_file)
+    if isinstance(module, symtable.Module):
+        comma = ''
+        def gen_params(pb):
+            nonlocal comma
+            for p in pb.required_params:
+                print(comma, p.C_local_name, sep='', end='', file=C_file)
+                comma = ', '
+            for p in pb.optional_params:
+                print(comma, p.C_local_name, sep='', end='', file=C_file)
+                comma = ', '
+
+        pb = module.pos_param_block
+        if pb is not None:
+            gen_params(pb)
+        for pb in module.kw_parameters.values():
+            gen_params(pb)
+    print(") {", file=C_file)
+
+    # FIX: Init module params/variables
+
+    for use in get_uses(module):
+        gen_module_init_call('module_instance', use)
+
+    for sub in get_routines(module):
+        gen_statement(
+          f'module_instance->{sub.C_local_name}.__base__.descriptor = '
+          f'&{sub.C_descriptor_name};')
+        gen_statement(
+          f'module_instance->{sub.C_local_name}.__base__.flags = 0;')
+        gen_statement(
+          f'module_instance->{sub.C_local_name}.__base__.global = '
+          'module_instance;')
+
+    print("}", file=C_file)
+
+
+def init_descriptors(module):
+    for routine in get_routines(module):
+        print(prepare_statement(
+                f"{routine.C_descriptor_name}.start_label = "
+                f"&&{routine.C_start_label_name};"),
+              file=C_file)
+
+
+def gen_module_init_call(parent_module_instance, use):
+    print(file=C_file)
+    print(prepare_statement(f"{use.module.C_init_C_fn_name}("
+                            f"${parent_module_instance}.{use.C_local_name}"),
+          end='', file=C_file)
+    # FIX: Pass module args
+    print(');', file=C_file)
+
+
 def emit_param_blocks(obj):
     if obj.pos_param_block is not None:
         emit_param_block(obj.pos_param_block)
@@ -434,8 +586,8 @@ def emit_param_block(pb):
 
 
 def gen_instance(module):
-    # FIX
-    pass
+    print(file=C_file)
+    print(f"struct {module.C_struct_name} {module.C_global_name};", file=C_file)
 
 
 def gen_code(m):
@@ -452,18 +604,6 @@ def gen_code(m):
     def gen_call(label):
         # FIX: complete this...
         gen_statement(f"goto {label};")
-
-    gen_label(m.C_init_subroutine_name)
-
-    for use in get_uses(m):
-        gen_call(use.module.C_init_subroutine_name)
-
-    for sub in get_routines(m):
-        gen_statement(
-          f'{sub.C_local_name}.__base__.descriptor = &{sub.C_descriptor_name};')
-        gen_statement(f'{sub.C_local_name}.__base__.flags = 0;')
-        gen_statement(
-          f'{sub.C_local_name}.__base__.global = &module_instance;')
 
     for sub in get_routines(m):
         gen_label(sub.C_start_label_name)
@@ -568,6 +708,10 @@ def prepare_statements(statements):
 
 def prepare_statement(line):
     return f"{symtable.indent_str(Statement_indent)}{line}"
+
+
+def gen_statement(line):
+    print(prepare_statement(line), file=C_file)
 
 
 def gen_expr(expr):

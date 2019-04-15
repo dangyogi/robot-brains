@@ -1,12 +1,12 @@
 Descriptors:
 
-- routine_descriptor has:       // init outside of main (NULL for start_label)
+- routine_descriptor has:       // init outside of main (except for start_label)
   - char *name
   - char type                   // 'S' or 'F'
   - int num_params_blocks
-  - param_block_descriptors *   // init outside of main
+  - param_block_descriptors *param_block_decriptors
+  - int routine_offset          // from start of module instance
   - void *start_label;          // set in routine init
-  - int routine_offset          // from start of module instance, routine init
 
 - param_block_descriptor has:   // init outside of main
   - char *name;                 // "__pos__" for pos_params
@@ -17,7 +17,7 @@ Descriptors:
   - int *param_offsets;         // indexed by num args passed
                                 // initialized as (int []){...}
 
-- use_descriptor has:
+- use_descriptor has:           // init outside of main
   - char *alias_name
   - int offset                  // offset from start of containing module to
                                 // used module instance
@@ -72,6 +72,10 @@ SOURCE FILE LAYOUT:
 - all descriptors
   - param_block_descriptors before their routine_descriptors
   - routine_descriptors before their module_descriptors
+- module init C functions (take module params as C params)
+  - initialize module parameters/variables
+  - call module inits for used modules
+  - init all contained routines
 - top-level opmode instance declaration
 - builtins declaration
 
@@ -83,10 +87,6 @@ SOURCE FILE LAYOUT:
   - call cycle.run
   - return 0
   - code for each module (not instance)
-    - module init code
-      - initialize module parameters/variables
-      - call module inits for used modules
-      - init all contained routines
     - code for each routine in that module (not instance)
   - built-in code
     - get_subroutines_by_name(routine_name$) -> TYPE SUBROUTINE generator

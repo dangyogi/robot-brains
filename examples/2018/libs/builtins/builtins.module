@@ -3,3 +3,5 @@
 # All names within this modules are available to all modules!
 
 module
+
+use cycle
