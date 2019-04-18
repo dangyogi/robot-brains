@@ -32,7 +32,7 @@ label forward
     ===========================================================
     dual.set_power leftMotor: 100%            |  X
                 -> rightMotor: 100%           |
-    goto cycle.next returning_to: forward     |
+    cycle.next returning_to: forward          |
     dual.set_power leftMotor: 0 rightMotor: 0 | X X
     return                                    |
     ===========================================================
@@ -44,7 +44,7 @@ label backward
     ===========================================================
     dual.set_power leftMotor: -100%             |  X
                 -> rightMotor: -100%            |
-    goto cycle.next returning_to: backward      |
+    cycle.next returning_to: backward           |
     dual.set_power leftMotor: 0 rightMotor: 0   | X X
     return                                      |
     ===========================================================

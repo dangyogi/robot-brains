@@ -2,6 +2,135 @@
 
 module
 
+type label_l_t is label label_t
+
+tasks IS label_t
+
+dim tasks[100][2]
+
+dim inum_tasks[2]
+
+what_next is label_t
+
+p_next is label_t
+p_done is label_t
+p_config is subr_t
+c_yield is label_l_t
+c_done is label_t
+c_config is subr_t
+
 
 subroutine run
+    run_all "init"
+
+label wait_for_start
+    ======================================================================
+    isAlive                             | NYY
+    isStarted                           | -NY
+    ======================================================================
+    goto wait_for_start                 |  X
+    run_all "start"                     |   X
+    goto run_stop                       | X
+    ======================================================================
+
+label run_stop
+    run_all "stop"
     return
+
+
+subroutine run_all name$
+    next_subr is subr_t
+
+    global.i_current = 0
+    global.i_next = 1
+    num_tasks[0] = 0
+    num_tasks[1] = 0
+
+    set p_config to: {{get_subroutines_by_name name$}}
+    p_config
+
+label c_yield next_subr
+
+label c_done
+
+    # Call all routines named name$
+    # Run queued tasks until the array is empty (or not isAlive)
+    complete_tasks
+
+
+subroutine c_config p_next: p_next p_done: p_done p_config: p_config
+
+    ====================================
+    YN | got? p_next:
+    ====================================
+    X  | set global.p_next to: p_next
+     X | goto do_p_done
+    ====================================
+
+label do_p_done
+    ====================================
+    YN | got? p_done:
+    ====================================
+    X  | set global.p_done to: p_done
+     X | goto do_p_config
+    ====================================
+
+label do_p_config
+    ====================================
+    YN | got? p_config:
+    ====================================
+    X  | p_config c_yield: set global.p_done to: p_done
+     X | return
+    ====================================
+
+
+subroutine complete_tasks
+    # Runs all queued tasks to completion or not isAlive.
+
+label again
+    ======================================================================
+    isAlive                     | NYY
+    inum_tasks[i_current] == 0  | -NY
+    ======================================================================
+    run_cycle                   |  X
+    goto again                  |
+    return                      |   X
+    ======================================================================
+
+
+subroutine run_cycle
+    # Runs all queued tasks up to their "next" call.
+    #
+    # Leaves new tasks in i_current
+
+    set global.i_task to: 0
+
+label again
+    ======================================================================
+    global.i_task < inum_tasks[i_current]       | YN
+    ======================================================================
+    goto tasks[global.i_task][i_current]        | X
+    i_next = i_current                          |  X
+    i_current = 1 - i_next                      |
+    return                                      |
+    ======================================================================
+
+label next_loop
+    global.i_task += 1
+    goto again
+
+
+subroutine next
+    # Returns on next cycle
+    schedule return
+    return to: run_cycle.next_loop
+
+
+subroutine schedule label
+    # Start a new thread
+    #
+    # FIX: Check overflow of tasks array
+    tasks[inum_tasks[i_next]][i_next] = label
+    inum_tasks[i_next] += 1
+    return
+

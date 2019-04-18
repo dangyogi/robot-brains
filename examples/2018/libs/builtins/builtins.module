@@ -5,3 +5,7 @@
 module
 
 use cycle
+
+type label_t is label
+
+type subr_t is subroutine

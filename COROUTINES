@@ -4,14 +4,15 @@ Iterators:
   - consumer has:
     - LABEL C_YIELD x // called repeatedly by producer
     - LABEL C_DONE    // called by producer at end-of-sequence, producer is dead
-    - SUB C_CONFIG p_next [p_done [p_config]]
+    - SUB C_CONFIG p_next: p_next p_done: p_done p_config: p_config
       - called at any time by producer to change P_ routines
   - producer has:
     - LABEL P_NEXT    // called repeatedly by consumer
     - SUB P_DONE      // called by consumer to terminate early
       - doesn't call C_DONE
-    - SUB P_CONFIG c_yield [c_done [c_config]]
+    - SUB P_CONFIG c_yield: c_yield c_done: c_done c_config: c_config
       - called at any time by consumer to change C_ routines
+      - if c_config passed, call it!
 
 
 Start Up:
