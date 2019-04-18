@@ -25,6 +25,8 @@ Start Up:
           - now consumer is initialized
           - does p_config always call c_config each time it's passed???
             - yes!
+          - does c_config always call p_config each time it's passed???
+            - no???
       - consumer calls p_next to start the iteration
 
 
