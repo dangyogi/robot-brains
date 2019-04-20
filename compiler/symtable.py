@@ -5,14 +5,11 @@ from collections import OrderedDict, ChainMap
 import scanner
 
 
-def push_namespace(ns):
-    # No longer used...
-    scanner.Namespaces.append(ns)
-    return entity
+Last_parameter_obj = None
 
 
-def pop_namespace():
-    del scanner.Namespaces[-1]
+def last_parameter_obj():
+    return Last_parameter_obj
 
 
 def current_namespace():
@@ -44,13 +41,13 @@ class Symtable:
 class Entity(Symtable):
     r'''Named entities within the current namespace.
     '''
-    def __init__(self, ident, no_prior_use=False):
+    def __init__(self, ident):
         self.name = ident
-        self.set_in_namespace(no_prior_use)
+        self.set_in_namespace()
 
-    def set_in_namespace(self, no_prior_use):
+    def set_in_namespace(self):
         self.parent_namespace = current_namespace()
-        self.parent_namespace.set(self.name, self, no_prior_use)
+        self.parent_namespace.set(self.name, self)
 
     def dump_details(self, f):
         super().dump_details(f)
@@ -80,63 +77,17 @@ class Entity(Symtable):
         pass
 
 
-class Reference(Entity):
-    r'''Undefined reference within a namespace.
+class Variable(Entity):
+    explicit_typedef = False
+    dimensions = ()
 
-    These are later resolved after the parsing is complete (by prepare).
-    '''
     def __init__(self, ident, **kws):
         Entity.__init__(self, ident)
-        for k, v in kws.items():
-            setattr(self, k, v)
-
-    def prepare(self, opmode):
-        r'''Resolve reference in parent_namespace, module, opmode, builtins.
-        '''
-        super().prepare(opmode)
-
-        # check in parent
-        referent = self.parent_namespace.lookup(self.name,
-                                                error_not_found=False)
-        if referent is not None:
-            self.referent = referent
-            self.referent_prefix = None
-            return
-
-        # check Module
-        if isinstance(self.parent_namespace, Subroutine):
-            referent = self.parent_namespace.parent_namespace \
-                           .lookup(self.name, error_not_found=False)
-            if referent is not None:
-                self.referent = referent
-                self.referent_prefix = 'global'
-                return
-
-        # check opmode
-        referent = opmode.lookup(self.name, error_not_found=False)
-        if referent is not None:
-            self.referent = referent
-            self.referent_prefix = 'opmode'
-            return
-
-        # check builtins
-        referent = opmode.builtins.lookup(self.name, error_not_found=False)
-        if referent is not None:
-            self.referent = referent
-            self.referent_prefix = 'builtins'
-            return
-
-        scanner.syntax_error("Undefined name", ident.lexpos, ident.lineno,
-                             ident.filename, ident.namespace)
-
-
-class Variable(Entity):
-    assignment_seen = False
-    dim = None
-
-    def __init__(self, ident, *, no_prior_use=False, **kws):
-        Entity.__init__(self, ident, no_prior_use)
-        self.type = ident.type
+        if 'type' in kws:
+            self.explicit_typedef = True
+            # self.type set in loop below
+        else:
+            self.type = ident.type
         for k, v in kws.items():
             setattr(self, k, v)
 
@@ -144,18 +95,12 @@ class Variable(Entity):
         super().dump_details(f)
         print(f" type={self.type}", end='', file=f)
 
-    def gen_struct_entry(self, generator):
-        #print(self.name.value, "gen_struct_entry", self.assignment_seen)
-        if self.assignment_seen:
-            generator.emit_struct_variable(self.type, self.name.value, self.dim)
 
-
-class Required_parameter(Variable):
-    assignment_seen = True
-
-    def __init__(self, ident, **kws):
-        Variable.__init__(self, ident, **kws)
-        current_namespace().pos_parameter(self)
+class Required_parameter(Symtable):
+    def __init__(self, ident):
+        self.name = ident
+        self.variable = current_namespace().make_variable(ident)
+        Last_parameter_obj.pos_parameter(self)
 
     def dump_details(self, f):
         super().dump_details(f)
@@ -164,13 +109,7 @@ class Required_parameter(Variable):
 
 
 class Optional_parameter(Required_parameter):
-    def __init__(self, ident, default, **kws):
-        self.default = default
-        Required_parameter.__init__(self, ident, **kws)
-
-    def dump_details(self, f):
-        super().dump_details(f)
-        print(f" default={self.default}", end='', file=f)
+    pass
 
 
 class Use(Entity):
@@ -193,6 +132,8 @@ class Typedef(Entity):
 
        (FUNCTION, taking_opt, returning_opt)
     or (SUBROUTINE, taking_opt)
+    or (LABEL, taking_opt)
+    or IDENT
     '''
     def __init__(self, ident, definition):
         Entity.__init__(self, ident)
@@ -204,10 +145,11 @@ class Typedef(Entity):
 
 
 class Param_block(Symtable):
-    def __init__(self, name="__pos__"):
+    def __init__(self, name="__pos__", optional=False):
         self.name = name
         self.required_params = []
         self.optional_params = []
+        self.optional = optional
 
     def dump(self, f, indent=0):
         print(indent_str(indent), self.name, " Parameters:", sep='', file=f)
@@ -230,66 +172,15 @@ class Param_block(Symtable):
             self.required_params.append(param)
 
 
-class With_parameters(Entity):
-    def __init__(self):
-        self.pos_param_block = None
-        self.kw_parameters = OrderedDict()      # {lname: Param_block}
-
-    def pos_parameter(self, param):
-        if self.pos_param_block is None:
-            self.pos_param_block = Param_block()
-            self.current_param_block = self.pos_param_block
-        self.current_param_block.add_parameter(param)
-
-    def kw_parameter(self, keyword):
-        lname = keyword.value.lower()
-        if lname in self.kw_parameters:
-            scanner.syntax_error("Duplicate keyword",
-                                 keyword.lexpos, keyword.lineno)
-        self.current_param_block = self.kw_parameters[lname] \
-          = Param_block(keyword.value)
-
-    def dump_contents(self, f, indent):
-        if self.pos_param_block is not None:
-            self.pos_param_block.dump(f, indent)
-        for pb in self.kw_parameters.values():
-            pb.dump(f, indent)
-        super().dump_contents(f)
-
-
-class Labeled_block(With_parameters):
-    def __init__(self, ident):
-        Entity.__init__(self, ident)
-        With_parameters.__init__(self)
-        current_namespace().push_labeled_block(self)
-        self.code_name = f"{self.parent_namespace.code_name}__{self.name.value}"
-
-    def add_first_block(self, block):
-        self.block = block
-
-    def dump_details(self, f):
-        super().dump_details(f)
-        print(f" block {self.block}", end='', file=f)
-
-    def dump_contents(self, f, indent):
-        super().dump_contents(f, indent)
-        self.block.dump(f, indent)
-
-    def gen_code(self, generator):
-        generator.emit_label(self.code_name)
-        self.block.gen_code(generator)
-
-
-class Namespace(Entity):
-    def __init__(self, ident):
-        Entity.__init__(self, ident)
+class Namespace(Symtable):
+    def __init__(self, name):
+        self.name = name
         self.names = {}
         #print(f"scanner.Namespaces.append({ident})")
         scanner.Namespaces.append(self)
-        self.code_name = self.name.value
 
     def __repr__(self):
-        return f"<{self.__class__.__name__} {self.name.value}>"
+        return f"<{self.__class__.__name__} {self.name}>"
 
     def prepare(self, opmode):
         #print("Namespace.prepare", self.__class__.__name__, self.name)
@@ -311,39 +202,30 @@ class Namespace(Entity):
             scanner.syntax_error("Undefined name", ident.lexpos, ident.lineno)
         return None
 
-    def set(self, ident, entity, no_prior_use=False):
+    def set(self, ident, entity):
         r'''Stores entity in self.names under ident.
-
-        Replaces Reference with entity unless no_prior_use is True.
 
         Reports duplicate names through scanner.syntax_error.
         '''
         lname = ident.value.lower()
-        current_entity = self.names.get(lname)
-        if current_entity is not None and \
-           (no_prior_use or not isinstance(current_entity, Reference)):
+        if lname in self.names:
+            print("other entity", self.names[lname])
             scanner.syntax_error("Duplicate definition",
                                  ident.lexpos, ident.lineno)
         self.names[lname] = entity
 
-    def ident_ref(self, ident):
+    def make_variable(self, ident):
         lname = ident.value.lower()
         if lname not in self.names:
-            self.names[lname] = Reference(ident)
-        return self.names[lname]
-
-    def assigned_to(self, ident):
-        lname = ident.value.lower()
-        current_entity = self.names.get(lname)
-        if current_entity is None or isinstance(current_entity, Reference):
-            self.names[lname] = Variable(ident, assignment_seen=True)
-            return
-        if isinstance(current_entity, Variable):
-            current_entity.assignment_seen = True
+            entity = self.names[lname] = Variable(ident)
         else:
-            scanner.syntax_error(
-                      f"Can not set {current_entity.__class__.__name__}",
-                      ident.lexpos, indent.lineno)
+            entity = self.names[lname]
+            if not isinstance(entity, Variable):
+                scanner.syntax_error(
+                  f"Duplicate definition with {entity.__class__.__name__} "
+                  f"on line {entity.name.lineno}",
+                  ident.lexpos, ident.lineno)
+        return entity
 
     def dump_contents(self, f, indent):
         for entity in self.names.values():
@@ -354,17 +236,17 @@ class Namespace(Entity):
             entity.gen_prep(generator)
 
     def gen_structs(self, generator):
-        #print("Namespace", self.name.value, "gen_structs")
+        #print("Namespace", self.name, "gen_structs")
         for entity in self.names.values():
             entity.gen_structs(generator)
 
     def gen_struct_entries(self, generator):
-        #print("Namespace", self.name.value, "gen_struct_entries")
+        #print("Namespace", self.name, "gen_struct_entries")
         for entity in self.names.values():
             entity.gen_struct_entry(generator)
 
     def gen_code(self, generator):
-        print("Namespace", self.name.value, "gen_code")
+        print("Namespace", self.name, "gen_code")
         for entity in self.names.values():
             entity.gen_code(generator)
 
@@ -379,7 +261,7 @@ class Dummy_token:
 
 class Opmode(Namespace):
     def __init__(self, modules_seen=None):
-        Namespace.__init__(self, Dummy_token(scanner.file_basename()))
+        Namespace.__init__(self, scanner.file_basename())
         self.filename = scanner.filename()
 
         if modules_seen is not None:
@@ -387,7 +269,7 @@ class Opmode(Namespace):
             # ... does not have lowered() keys!
             self.modules_seen = modules_seen
 
-    def set_in_namespace(self, no_prior_use):
+    def set_in_namespace(self):
         pass
 
     #def dump_details(self, f):
@@ -412,11 +294,39 @@ class Opmode(Namespace):
         generator.end_code()
 
 
+class With_parameters(Symtable):
+    def __init__(self):
+        global Last_parameter_obj
+        self.pos_param_block = None
+        self.kw_parameters = OrderedDict()      # {lname: Param_block}
+        Last_parameter_obj = self
+
+    def pos_parameter(self, param):
+        if self.pos_param_block is None:
+            self.pos_param_block = Param_block()
+            self.current_param_block = self.pos_param_block
+        self.current_param_block.add_parameter(param)
+
+    def kw_parameter(self, keyword, optional=False):
+        lname = keyword.value.lower()
+        if lname in self.kw_parameters:
+            scanner.syntax_error("Duplicate keyword",
+                                 keyword.lexpos, keyword.lineno)
+        self.current_param_block = self.kw_parameters[lname] \
+          = Param_block(keyword.value, optional)
+
+    def dump_contents(self, f, indent):
+        if self.pos_param_block is not None:
+            self.pos_param_block.dump(f, indent)
+        for pb in self.kw_parameters.values():
+            pb.dump(f, indent)
+        super().dump_contents(f, indent)
+
+
 class Module(Opmode, With_parameters):
     def __init__(self):
         Opmode.__init__(self)
         With_parameters.__init__(self)
-        self.struct_name = self.name.value + "_module"
 
     def gen_structs(self, generator):
         super().gen_structs(generator)
@@ -425,51 +335,33 @@ class Module(Opmode, With_parameters):
         generator.emit_struct_end()
 
 
-class Subroutine(Namespace, With_parameters):
-    struct_name_suffix = "_sub"
-    first_block = None
+class Labeled_block(Entity, With_parameters):
+    block = None
 
     def __init__(self, ident):
-        Namespace.__init__(self, ident)
+        Entity.__init__(self, ident)
         With_parameters.__init__(self)
-        self.current_block = None
-        self.code_name = f"{self.parent_namespace.code_name}__{self.name.value}"
-        self.struct_name = self.code_name + self.struct_name_suffix
-        self.vars_name = self.name.value + "_vars"
-        self.labels = {}        # {label: parameters} only with parameters
-        self.start_labels = {}  # {base_name: [label]}
 
-    def add_first_block(self, first_block):
-        if self.current_block is None:
-            self.first_block = first_block
-        else:
-            self.current_block.add_first_block(first_block)
+    def add_first_block(self, block):
+        self.block = block
 
-    def push_labeled_block(self, labeled_block):
-        self.current_block = labeled_block
+    def dump_details(self, f):
+        super().dump_details(f)
+        if self.block is not None:
+            print(f" block {self.block}", end='', file=f)
 
     def dump_contents(self, f, indent):
         super().dump_contents(f, indent)
-        if self.first_block is not None:
-            self.first_block.dump(f, indent)
-
-    #def gen_prep(self, generator):
-    #    self.gen_name = self.name.value
-
-    def gen_structs(self, generator):
-        self.type_name = generator.emit_struct_start(self.struct_name)
-        self.gen_ret_entry(generator)
-        self.gen_struct_entries(generator)
-        generator.emit_struct_end()
-
-    def gen_ret_entry(self, generator):
-        generator.emit_struct_sub_ret_info()
-
-    def gen_struct_entry(self, generator):
-        generator._emit_struct_variable(self.type_name, self.vars_name)
+        if self.block is not None:
+            self.block.dump(f, indent)
 
     def gen_code(self, generator):
-        pass
+        generator.emit_label(self.code_name)
+        self.block.gen_code(generator)
+
+
+class Subroutine(Labeled_block):
+    struct_name_suffix = "_sub"
 
 
 class Function(Subroutine):
@@ -594,7 +486,7 @@ class Conditions(Symtable):
     self.num_columns is the number of columns in the DLT.
     self.offset is the number of spaces between the '|' and the first column.
     self.column_masks has one list of masks for each column.
-    self.last_rest is the last rest Token (for future syntax errors).
+    self.dlt_mask is the dlt_mask Token (for future syntax errors).
     '''
     def __init__(self, conditions):
         r'self.conditions is ((expr, rest), ...)'
@@ -603,37 +495,35 @@ class Conditions(Symtable):
     def compile_conditions(self, conditions):
         self.exprs = []  # exprs form bits in mask, ordered MSB to LSB
         self.offset = None
-        for expr, rest in conditions:
-            if not rest.value.strip():
-                scanner.syntax_error("Missing condition flags",
-                                     rest.lexpos, rest.lineno)
+        for dlt_mask, expr in conditions:
             if self.offset is None:
-                self.offset = len(rest.value) - len(rest.value.lstrip())
-                self.num_columns = len(rest.value.strip())
+                self.offset = len(dlt_mask.value) - len(dlt_mask.value.lstrip())
+                self.num_columns = len(dlt_mask.value.strip())
                 columns = [[] for _ in range(self.num_columns)]
-            this_offset = len(rest.value) - len(rest.value.lstrip())
+            this_offset = len(dlt_mask.value) - len(dlt_mask.value.lstrip())
             if this_offset != self.offset:
                 scanner.syntax_error("Condition flags don't start in the same "
                                      "column as previous condition",
-                                     rest.lexpos + this_offset, rest.lineno)
-            rest.value = rest.value.lstrip()
-            rest.lexpos += this_offset
-            if len(rest.value.strip()) != self.num_columns:
+                                     dlt_mask.lexpos + this_offset,
+                                     dlt_mask.lineno)
+            dlt_mask.value = dlt_mask.value.lstrip()
+            dlt_mask.lexpos += this_offset
+            if len(dlt_mask.value.strip()) != self.num_columns:
                 scanner.syntax_error("Must have same number of condition flags "
                                      "as previous condition",
-                                     rest.lexpos, rest.lineno)
+                                     dlt_mask.lexpos, dlt_mask.lineno)
             self.exprs.append(expr)
-            for i, flag in enumerate(rest.value.strip()):
+            for i, flag in enumerate(dlt_mask.value.strip()):
                 if flag not in '-yYnN':
                     scanner.syntax_error("Illegal condition flag, "
                                          "expected 'y', 'n', or '-'",
-                                         rest.lexpos + i, rest.lineno)
+                                         dlt_mask.lexpos + i, dlt_mask.lineno)
                 columns[i].append(flag.upper())
 
         #print("exprs", self.exprs, "offset", self.offset,
         #      "num_columns", self.num_columns, "columns", columns)
 
-        self.last_rest = rest
+        self.dlt_mask = dlt_mask
 
         # Generate column_masks.  Column_masks has one list of masks for each
         # column.
@@ -648,8 +538,8 @@ class Conditions(Symtable):
             for mask in masks:
                 if mask in seen:
                     scanner.syntax_error("Duplicate condition flags",
-                                         self.last_rest.lexpos + i,
-                                         self.last_rest.lineno)
+                                         self.dlt_mask.lexpos + i,
+                                         self.dlt_mask.lineno)
                 else:
                     seen.add(mask)
 
@@ -661,8 +551,8 @@ class Conditions(Symtable):
         if unseen:
             scanner.syntax_error("Missing condition flags (top to bottom): "
                                    + ', '.join(unseen),
-                                 self.last_rest.lexpos + self.num_columns,
-                                 self.last_rest.lineno)
+                                 self.dlt_mask.lexpos + self.num_columns,
+                                 self.dlt_mask.lineno)
 
     def gen_masks(self, flags, i=None):
         if not flags: return [0]
@@ -683,8 +573,8 @@ class Conditions(Symtable):
         missing_columns = actions.apply_offset(self.offset, self.num_columns)
         if missing_columns:
             scanner.syntax_error("Missing action for this column",
-                                 self.last_rest.lexpos + missing_columns[0],
-                                 self.last_rest.lineno)
+                                 self.dlt_mask.lexpos + missing_columns[0],
+                                 self.dlt_mask.lineno)
 
     def gen_code(self, f, indent=0):
         prefix = indent_str(indent)
@@ -698,10 +588,10 @@ class Conditions(Symtable):
 
 class Actions(Symtable):
     r'''
-    self.blocks is [(rest, [column_number], [statement])]
+    self.blocks is [(dlt_map, [column_number], [statement])]
     '''
     def __init__(self, actions):
-        r'self.actions is ((statement, rest), ...)'
+        r'self.actions is ((dlt_map, statement), ...)'
         self.compile_actions(actions)
 
     def compile_actions(self, actions):
@@ -709,30 +599,31 @@ class Actions(Symtable):
 
         Checks for duplicate markers in the same column.
         '''
-        if not actions[0][1].value.strip():
-            rest = actions[0][1]
+        if not actions[0][0].value.strip():
+            dlt_map = actions[0][0]
             scanner.syntax_error("Missing column marker(s) on first DLT action",
-                                 rest.lexpos, rest.lineno)
+                                 dlt_map.lexpos, dlt_map.lineno)
 
         # Gather blocks of actions.
         # A block starts with an action that has column markers, and includes
         # all of the following actions without column markers.
-        self.blocks = []  # (rest, [column_number], [statement])
+        self.blocks = []  # (dlt_map, [column_number], [statement])
         seen = set()
-        for statement, rest in actions:
-            markers = rest.value.rstrip()
+        for dlt_map, statement in actions:
+            markers = dlt_map.value.rstrip()
             if markers:
                 column_numbers = []
                 for i, marker in enumerate(markers):
                     if marker in 'xX':
                         if i in seen:
                             scanner.syntax_error("Duplicate action for column",
-                                                 rest.lexpos + i, rest.lineno)
+                                                 dlt_map.lexpos + i,
+                                                 dlt_map.lineno)
                         column_numbers.append(i)
                     elif marker != ' ':
                         scanner.syntax_error("Column marker must be 'X' or ' '",
-                                             rest.lexpos + i, rest.lineno)
-                self.blocks.append((rest, column_numbers, [statement]))
+                                             dlt_map.lexpos + i, dlt_map.lineno)
+                self.blocks.append((dlt_map, column_numbers, [statement]))
             else:
                 self.blocks[-1][2].append(statement)
 
@@ -745,14 +636,14 @@ class Actions(Symtable):
         Returns an ordered list of missing column_numbers.
         '''
         seen = set()
-        for rest, column_numbers, _ in self.blocks:
+        for dlt_map, column_numbers, _ in self.blocks:
             for i in range(len(column_numbers)):
                 if column_numbers[i] < offset or \
                    column_numbers[i] - offset >= num_columns:
                     scanner.syntax_error("Column marker does not match "
                                          "any column in DLT conditions section",
-                                         rest.lexpos + column_numbers[i],
-                                         rest.lineno)
+                                         dlt_map.lexpos + column_numbers[i],
+                                         dlt_map.lineno)
                 column_numbers[i] -= offset
                 seen.add(column_numbers[i])
 

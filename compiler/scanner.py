@@ -10,6 +10,13 @@ import ply.lex as lex
 Namespaces = []
 Num_errors = 0
 
+Expanded_kws = False
+
+
+def set_expanded_kws(value):
+    global Expanded_kws
+    Expanded_kws = value
+
 
 class Token:
     def __init__(self, lex_token, value=None, type=None, lexpos=None,
@@ -42,6 +49,7 @@ class Token:
 reserved = frozenset((
     'AS',
     'AUTONOMOUS',
+    'CONTINUE',
     'DIM',
     'FUNCTION',
     'GOTO',
@@ -68,10 +76,14 @@ tokens = (
     'AEQ',
     'BOOL',
     'DLT_DELIMITER',
+    'DLT_MAP',
+    'DLT_MASK',
     'EQ',
     'FLOAT',
+    'FROM',      # FROM:  expanded_kw
     'GAEQ',
     'GEQ',
+    'GOT',
     'IDENT',
     'INTEGER',
     'KEYWORD',
@@ -81,9 +93,10 @@ tokens = (
     'NEQ',
     'NEWLINE',
     'OPEQ',
-    'REST',
+    'OPT_KEYWORD',
     'RETURNING_TO',
     'STRING',
+    'TO',        # TO:  expanded_kw
 
 ) + tuple(reserved)
 
@@ -152,16 +165,15 @@ scales = {
 t_INITIAL_ignore = ' '
 
 t_ANY_ignore_COMMENT = r'\#.*'
+t_ANY_ignore_empty_DLT_MASK = r'\|\ +\|'
 
 
-literals = "+-*/%^=<>.()[]{}"
-
-last_rest = None
+literals = "+-*/%^?<>.()[]{}"
 
 
 def t_CONTINUATION(t):
     r'\n[ ]*->'
-    #print("t_CONTINUATION", repr(t.value), last_rest,
+    #print("t_CONTINUATION", repr(t.value), 
     #      "at", t.lineno, t.lexpos)
     t.lexer.lineno += 1
     # No token returned, ie., swallow NEWLINE
@@ -169,16 +181,9 @@ def t_CONTINUATION(t):
 
 def t_NEWLINE(t):
     r'\n+'
-    global last_rest
     #print("t_NEWLINE", repr(t.value), "at", t.lineno, t.lexpos)
     t.lexer.lineno += len(t.value)
-    if last_rest is not None:
-        #print("t_NEWLINE returning last_rest", last_rest)
-        t.value = last_rest
-        t.type = 'REST'
-        last_rest = None
-    else:
-        t.value = Token(t)
+    t.value = Token(t)
     return t
 
 
@@ -227,8 +232,21 @@ def t_KEYWORD(t):
     r'[a-zA-Z_][a-zA-Z_0-9]*:'
     if t.value.lower() == 'returning_to:':
         t.type = 'RETURNING_TO'
-    else:
-        t.value = Token(t)
+        return t
+    if Expanded_kws:
+        if t.value.lower() == 'from:':
+            t.type = 'FROM'
+            return t
+        if t.value.lower() == 'to:':
+            t.type = 'TO'
+            return t
+    t.value = Token(t)
+    return t
+
+
+def t_OPT_KEYWORD(t):
+    r'\?[a-zA-Z_][a-zA-Z_0-9]*:'
+    t.value = Token(t, value=t.value[1:], lexpos=t.lexpos + 1)
     return t
 
 
@@ -241,13 +259,15 @@ def t_STRING_IDENT(t):
 
 def t_BOOL_IDENT(t):
     r'[a-zA-Z_][a-zA-Z_0-9]*\?'
-    name = t.value
-    if name.lower() == 'true?':
+    uname = t.value.upper()
+    if uname == 'TRUE?':
         t.value = True
         t.type = 'BOOL'
-    elif name.lower() == 'false?':
+    elif uname == 'FALSE?':
         t.value = False
         t.type = 'BOOL'
+    elif uname == 'GOT?':
+        t.type = 'GOT'
     else:
         t.value = Token(t, type='bool')
         t.type = 'IDENT'
@@ -298,20 +318,16 @@ def t_DLT_DELIMITER(t):
     return t
 
 
-def t_REST(t):
-    r'\|[^#\n]*'
-    global last_rest
-    t.value = t.value[1:]
-    if t.value.strip():
-        if last_rest is None:
-            last_rest = Token(t, lexpos=t.lexpos + 1)
-            #print("t_REST: got", t.lexpos,
-            #      "setting last_rest to", last_rest)
-        else:
-            syntax_error("Not allowed on continuation line",
-                         t.lexpos
-                           + 1 + (len(t.value) - len(t.value.lstrip())),
-                         t.lineno)
+def t_DLT_MASK(t):
+    r'\|\ *[-yYnN]+\ *\|'
+    t.value = Token(t, t.value[1:-1].rstrip(), lexpos=t.lexpos + 1)
+    return t
+
+
+def t_DLT_MAP(t):
+    r'\|\ *[xX][ xX]*\|'
+    t.value = Token(t, t.value[1:-1].rstrip(), lexpos=t.lexpos + 1)
+    return t
 
 
 def t_EQ(t):

@@ -512,7 +512,7 @@ def gen_structs(module):
             _emit_struct_variable(f"struct {obj.module.C_struct_name} ",
                                   obj.C_local_name)
         elif isinstance(obj, symtable.Variable):
-            emit_struct_variable(obj.type, obj.C_local_name, obj.dim)
+            emit_struct_variable(obj.type, obj.C_local_name, obj.dimensions)
         elif isinstance(obj, symtable.Subroutine):
             _emit_struct_variable(f"struct {obj.C_struct_name}",
                                   obj.C_local_name)
@@ -529,7 +529,7 @@ def gen_routine_struct(routine):
             # FIX, we need to allow multiple labels to declare the same params!
             pass
         elif isinstance(obj, symtable.Variable):
-            emit_struct_variable(obj.type, obj.C_local_name, obj.dim)
+            emit_struct_variable(obj.type, obj.C_local_name, obj.dimensions)
         elif isinstance(obj, symtable.Labeled_block):
             emit_param_blocks(obj)
     for type, name in routine.C_temps:
@@ -605,7 +605,7 @@ def emit_param_blocks(obj):
 
 def emit_param_block(pb):
     for p in pb.required_params:
-        emit_struct_variable(p.type, p.C_local_name, p.dim)
+        emit_struct_variable(p.type, p.C_local_name, p.dimensions)
     if pb.optional_params:
         _emit_struct_variable(
           f"struct {pb.optional_param_block_struct_name }", 
@@ -690,16 +690,19 @@ def emit_struct_start(name):
           sep='', file=C_file)
 
 
-def emit_struct_variable(type, name, dim=None):
-    _emit_struct_variable(types[type], name, dim)
+def emit_struct_variable(type, name, dimensions=()):
+    _emit_struct_variable(types[type], name, dimensions)
 
 
-def _emit_struct_variable(type, name, dim=None):
+def _emit_struct_variable(type, name, dimensions=()):
     print(symtable.indent_str(Struct_var_indent), type,
           sep='', end='', file=C_file)
     if not type.endswith('*'):
         print(' ', end='', file=C_file)
-    print(f"{name};", file=C_file)
+    print(f"{name}", end='', file=C_file)
+    for dim in dimensions:
+        print(f"[{dim}]", end='', file=C_file)
+    print(';', file=C_file)
 
 
 def emit_struct_end():

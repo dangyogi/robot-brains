@@ -7,23 +7,21 @@ module
 use cycle
 
 type label_t is label
-type label_l_t is label label_t
+type label_l_t is label taking label_t
 
-type p_config_t is subroutine c_yield: label_l_t c_done: label_t 
-                           -> c_config: c_config_t
+type p_config_t is subroutine taking ?c_yield: label_l_t ?c_done: label_t
+                                  -> ?c_config: c_config_t
 
-type c_config_t is subroutine p_next: label_t p_done: subr_t 
-                           -> p_config: p_config_t
+type c_config_t is subroutine taking ?p_next: label_t ?p_done: subr_t
+                                  -> ?p_config: p_config_t
 
 type subr_t is subroutine
 
-get_subroutines_by_name is function taking: name$ returning: p_config_t
 
+function get_subroutines_by_name name$ returning p_config_t
+  goto ret_pointer p_config
 
-function get_subroutines_by_name name$
-  goto return p_config
-
-  subroutine p_config c_yield: c_yield c_done: c_done c_config: c_config
+  subroutine p_config ?c_yield: c_yield ?c_done: c_done ?c_config: c_config
     c_yield is label_l_t
     c_done is label
     c_config is c_config_t
@@ -35,12 +33,12 @@ function get_subroutines_by_name name$
 
   label next_module
     ======================================================================
-    YN | imodule_index < {get_num_modules}
+    | YN | imodule_index < {get_num_modules}
     ======================================================================
-    X  | set iroutine_index to: 0
-       | goto next_routine
-     X | done with: get_subroutine_by_name
-       | goto c_done
+    | X  | set iroutine_index to: 0
+    |    | goto next_routine
+    |  X | done with: get_subroutine_by_name
+    |    | goto c_done
     ======================================================================
 
   subroutine p_done
@@ -49,18 +47,20 @@ function get_subroutines_by_name name$
 
   label next_routine
     ======================================================================
-    YN | iroutine_index < {get_num_routines imodule_index}
+    | YN | iroutine_index < {get_num_routines imodule_index}
     ======================================================================
-    X  | goto check_name
-     X | goto next_module
+    | X  | goto check_name
+    |  X | goto next_module
+    ======================================================================
 
   label check_name
     ======================================================================
-    YN | {get_routine_name imodule_index iroutine_index} == name$
+    | YN | {get_routine_name imodule_index iroutine_index} == name$
     ======================================================================
-    X  | set i to: iroutine_index
-       | iroutine_index += 1
-       | c_yield {get_routine imodule_index i}
-     X | iroutine_index += 1
-       | goto next_routine
+    | X  | set i to: iroutine_index
+    |    | iroutine_index += 1
+    |    | c_yield {get_routine imodule_index i}
+    |  X | iroutine_index += 1
+    |    | goto next_routine
     ======================================================================
+

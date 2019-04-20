@@ -4,9 +4,12 @@ import operator
 import os.path
 import ply.yacc as yacc
 
-from scanner import tokens, syntax_error, lex_file, Token, check_for_errors
+from scanner import (
+    tokens, syntax_error, lex_file, Token, check_for_errors, set_expanded_kws,
+)
+
 from symtable import (
-    pop_namespace, current_namespace, top_namespace, Module, Opmode,
+    last_parameter_obj, current_namespace, top_namespace, Module, Opmode,
     Subroutine, Function, Use, Typedef, Labeled_block, Block,
     DLT, Conditions, Actions, Variable, Required_parameter, Optional_parameter,
     Statement, Call_statement, Opeq_statement,
@@ -36,6 +39,8 @@ def p_empty_tuple(p):
     '''
     pos_arguments :
     kw_arguments :
+    kw_parameter_types :
+    parameter_types_list :
     primarys :
     returning_opt :
     taking_opt :
@@ -54,12 +59,13 @@ def p_first(p):
             | FLOAT
             | INTEGER
             | BOOL
-            | ident_ref
+            | IDENT
     statement : simple_statement newlines
               | dlt
     pos_arguments : pos1_arguments
     opmode_type : AUTONOMOUS
                 | TELEOP
+    type : IDENT
     '''
     p[0] = p[1]
 
@@ -69,7 +75,7 @@ def p_second(p):
     primary : '(' expr ')'
     const_expr : '(' const_expr ')'
     returning_opt : RETURNING idents
-    taking_opt : TAKING idents
+    taking_opt : TAKING parameter_types
     '''
     p[0] = p[2]
 
@@ -91,23 +97,26 @@ def p_none(p):
           | decls fn_decl
           | decls sub_decl
     parameters : pos_parameters kw_parameters
-    pos1_parameters : parameter
-    pos1_parameters : pos1_parameters parameter
-    pos_parameters :
-                   | pos1_parameters
+    pos_parameters : required_parameters
+    pos_parameters : required_parameters '?' optional_parameters
+    required_parameters :
+    required_parameters : required_parameters required_parameter
+    optional_parameters : optional_parameter
+    optional_parameters : optional_parameters optional_parameter
     kw_parameters :
-                  | kw_parameters keyword pos1_parameters
+                  | kw_parameters keyword pos_parameters
     uses :
          | uses use
     fn_decl : FUNCTION fn_name parameters set_returning_opt newlines \
-              typedefs vartypes first_block labeled_blocks pop
+              typedefs vartypes first_block labeled_blocks
     sub_decl : SUBROUTINE sub_name parameters newlines \
-               typedefs vartypes first_block labeled_blocks pop
+               typedefs vartypes first_block labeled_blocks
     first_block :
     labeled_blocks :
     labeled_blocks : labeled_blocks labeled_block
-    labeled_block : LABEL labeled_block_name pos_parameters newlines \
-                    first_block
+    labeled_block : LABEL labeled_block_name parameters newlines \
+                    typedefs vartypes first_block
+    from_opt :
     '''
     p[0] = None
 
@@ -119,6 +128,7 @@ def p_1tuple(p):
     pos1_arguments : primary
     statements1 : statement
     idents : IDENT
+    dimensions : dimension
     '''
     p[0] = (p[1],)
 
@@ -131,9 +141,21 @@ def p_append(p):
     actions : actions action
     idents : idents IDENT
     pos1_arguments : pos1_arguments primary
+    kw_parameter_types : kw_parameter_types kw_parameter_type
+    parameter_types_list : parameter_types_list IDENT
     primarys : primarys primary
+    dimensions : dimensions dimension
     '''
     p[0] = p[1] + (p[2],)
+
+
+def p_dimension(p):
+    '''
+    dimension : '[' const_expr ']'
+    '''
+    if not isinstance(p[2], int):
+        syntax_error("Must have integer DIM", p[2].lexpos, p[2].lineno)
+    p[0] = (p[2],)
 
 
 def p_all(p):
@@ -160,10 +182,31 @@ def p_all(p):
          | expr NAEQ expr
     primary : primary '.' IDENT
             | primary '[' expr ']'
+            | GOT KEYWORD
+            | GOT IDENT
     lvalue : primary '.' IDENT
     lvalue : primary '[' expr ']'
+    parameter_types : pos_parameter_types kw_parameter_types
+    kw_parameter_type : KEYWORD pos_parameter_types
+    kw_parameter_type : OPT_KEYWORD pos_parameter_types
+    type : FUNCTION taking_opt returning_opt
+         | SUBROUTINE taking_opt
+         | LABEL taking_opt
+    from_opt : FROM primary
     """
     p[0] = tuple(p[1:])
+
+
+def p_pos_parameter_types1(p):
+    'pos_parameter_types : parameter_types_list'
+    p[0] = p[1], ()
+
+
+def p_pos_parameter_types2(p):
+    '''
+    pos_parameter_types : parameter_types_list '?' parameter_types_list
+    '''
+    p[0] = p[1], p[3]
 
 
 def p_const_numeric_expr_uminus(p):
@@ -216,19 +259,42 @@ def p_const_bool_expr_uminus(p):
 def p_simple_statement1(p):
     r"""
     simple_statement : PASS
+                     | CONTINUE
                      | PREPARE primary arguments
                      | REUSE primary
                      | REUSE primary RETURNING_TO primary
                      | RELEASE primary
-                     | SET lvalue kw_to primary
                      | GOTO primary pos_arguments
-                     | RETURN primarys
-                     | RETURN primarys kw_to primary
     """
     p[0] = Statement(p.lineno(1), *p[1:])
 
 
 def p_simple_statement2(p):
+    r"""
+    simple_statement : SET extended_kws lvalue TO normal_kws primary
+    """
+    p[0] = Statement(p.lineno(1), p[1], p[3], p[6])
+
+
+def p_simple_statement3(p):
+    r"""
+    simple_statement : extended_kws RETURN primarys from_opt normal_kws
+                     | extended_kws RETURN primarys from_opt TO primary normal_kws
+    """
+    p[0] = Statement(p.lineno(2), p[2], *p[3:-1])
+
+
+def p_extended_kws(p):
+    r'extended_kws : '
+    set_expanded_kws(True)
+
+
+def p_normal_kws(p):
+    r'normal_kws : '
+    set_expanded_kws(False)
+    
+
+def p_simple_statement4(p):
     r"""
     simple_statement : primary arguments
                      | primary arguments RETURNING_TO primary
@@ -236,7 +302,7 @@ def p_simple_statement2(p):
     p[0] = Call_statement(p.lineno(1), *p[1:])
 
 
-def p_simple_statement3(p):
+def p_simple_statement5(p):
     r"""
     simple_statement : primary OPEQ primary
     """
@@ -263,18 +329,6 @@ def p_primary(p):
     p[0] = ('call_fn', p[2], p[3])
 
 
-def p_ident_ref(p):
-    'ident_ref : IDENT'
-    current_namespace().ident_ref(p[1])
-    p[0] = p[1]
-
-
-def p_lvalue(p):
-    'lvalue : IDENT'
-    current_namespace().assigned_to(p[1])
-    p[0] = p[1]
-
-
 def p_make_opmode(p):
     'make_opmode :'
     Opmode(Modules_seen)
@@ -283,24 +337,24 @@ def p_make_opmode(p):
 def p_make_module(p):
     'make_module :'
     module = Module()
-    name = module.name.value
+    name = module.name
     assert name not in Modules_seen
     #print("make_module seen", name)
     Modules_seen[name] = module
 
 
-def p_parameter1(p):
+def p_required_parameter(p):
     '''
-    parameter : IDENT
+    required_parameter : IDENT
     '''
     Required_parameter(p[1])
 
 
-def p_parameter2(p):
+def p_optional_parameter(p):
     '''
-    parameter : IDENT '=' const_expr
+    optional_parameter : IDENT
     '''
-    Optional_parameter(p[1], p[3])
+    Optional_parameter(p[1])
 
 
 def p_keyword(p):
@@ -308,16 +362,14 @@ def p_keyword(p):
     current_namespace().kw_parameter(p[1])
 
 
-def p_kw_to(p):
-    'kw_to : KEYWORD'
-    if p[1].value.lower() != 'to:':
-        syntax_error("Expected 'TO:'", p[1].lexpos, p[1].lineno)
-    p[0] = p[1]
+def p_opt_keyword(p):
+    "keyword : OPT_KEYWORD"
+    current_namespace().kw_parameter(p[1], optional=True)
 
 
 def p_use1(p):
     '''
-    use : USE ident_ref arguments newlines
+    use : USE IDENT arguments newlines
     '''
     Use(p[2], p[2], p[3])
     name = p[2].value
@@ -328,7 +380,7 @@ def p_use1(p):
 
 def p_use2(p):
     '''
-    use : USE ident_ref AS IDENT arguments newlines
+    use : USE IDENT AS IDENT arguments newlines
     '''
     Use(p[4], p[2], p[5])
     name = p[2].value
@@ -339,58 +391,62 @@ def p_use2(p):
 
 def p_typedef(p):
     '''
-    typedef : TYPE ident_ref IS FUNCTION taking_opt returning_opt newlines
-            | TYPE ident_ref IS SUBROUTINE taking_opt newlines
-            | TYPE ident_ref IS LABEL taking_opt newlines
+    typedef : TYPE IDENT IS type newlines
     '''
-    Typedef(p[2], *p[4:-1])
+    Typedef(p[2], p[4])
 
 
 def p_set_returning_opt(p):
     'set_returning_opt : returning_opt'
     if p[1] is not None:
-        current_namespace().set_return_types(p[1])
+        last_parameter_obj().set_return_types(p[1])
 
 
 def p_vartype(p):
     '''
-    vartype : IDENT IS IDENT newlines
+    vartype : IDENT IS type newlines
     '''
-    Variable(p[1], type=p[3], no_prior_use=True)
+    var = current_namespace().make_variable(p[1])
+    if var.explicit_typedef:
+        syntax_error("Duplicate variable type declaration",
+                     p[1].lexpos, p[1].lineno)
+    var.type = p[3]
+    var.explicit_typedef = True
+
+
+def p_lvalue(p):
+    'lvalue : IDENT'
+    p[0] = current_namespace().make_variable(p[1])
 
 
 def p_dim(p):
     '''
-    vartype : DIM IDENT '[' const_expr ']' newlines
+    vartype : DIM IDENT dimensions newlines
     '''
-    if not isinstance(p[4], int):
-        syntax_error("Must have integer DIM", p[4].lexpos, p[4].lineno)
-    current_entity = current_namespace().lookup(p[2], error_not_found=False)
-    if isinstance(current_entity, Reference) or \
-       isinstance(current_entity, Variable) and current_entity.assignment_seen:
-        syntax_error("Variable referenced before DIM", p[2].lexpos, p[2].lineno)
-    if not isinstance(current_entity, Variable):
-        current_entity = Variable(p[2])
-    current_entity.dim = p[4]
+    var = current_namespace().make_variable(p[2])
+    if var.dimensions:
+        syntax_error("Duplicate variable DIM declaration",
+                     p[2].lexpos, p[2].lineno)
+    var.dimensions = p[3]
 
 
 def p_fn_name(p):
-    'fn_name : ident_ref'
+    'fn_name : IDENT'
     Function(p[1])
 
 
 def p_sub_name(p):
-    'sub_name : ident_ref'
+    'sub_name : IDENT'
     Subroutine(p[1])
 
 
 def p_first_block(p):
     'first_block : block'
-    current_namespace().add_first_block(p[1])
+    last_parameter_obj().add_first_block(p[1])
 
 
 def p_labeled_block_name(p):
-    'labeled_block_name : ident_ref'
+    'labeled_block_name : IDENT'
     Labeled_block(p[1])
 
 
@@ -407,23 +463,30 @@ def p_dlt(p):
 
 def p_condition(p):
     '''
-    condition : expr REST
+    condition : DLT_MASK expr newlines
     '''
     p[0] = p[1], p[2]
 
 
 def p_action1(p):
     '''
-    action : simple_statement NEWLINE
+    action : simple_statement newlines
     '''
-    p[0] = p[1], Token(p[2], value='')
+    p[0] = Token(None, value='', lexpos=p.lexpos(1), lineno=p.lineno(1)), p[1]
 
 
 def p_action2(p):
     '''
-    action : simple_statement REST
+    action : DLT_MAP simple_statement newlines
     '''
     p[0] = p[1], p[2]
+
+
+def p_action3(p):
+    '''
+    action : DLT_MAP newlines
+    '''
+    p[0] = p[1], None
 
 
 def p_dlt_conditions(p):
@@ -434,11 +497,6 @@ def p_dlt_conditions(p):
 def p_dlt_actions(p):
     'dlt_actions : actions'
     p[0] = Actions(p[1])
-
-
-def p_pop(p):
-    'pop :'
-    pop_namespace()
 
 
 def p_error(t):
