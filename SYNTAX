@@ -21,44 +21,59 @@ module: MODULE parameters NEWLINES
         {use}
         {typedef}
         {vartype}
-        {fn_decl | sub_decl}
+        {fn_decl | sub_decl | labeled_block}
 
 
 use: USE IDENT [AS IDENT] arguments NEWLINES
 
 
-typedef: TYPE IDENT IS FUNCTION [TAKING 1{IDENT}] [RETURNING 1{IDENT}]
-           NEWLINES
-       | TYPE IDENT IS SUBROUTINE [TAKING 1{IDENT}] NEWLINES
-       | TYPE IDENT IS LABEL [TAKING 1{IDENT}] NEWLINES
+typedef: TYPE IDENT IS type NEWLINES
 
 
-vartype: IDENT IS IDENT NEWLINESS
-       | DIM IDENT '[' const_expr ']' NEWLINES
+type: FUNCTION [TAKING parameter_types] [RETURNING 1{IDENT}]
+    | SUBROUTINE [TAKING parameter_types]
+    | LABEL [TAKING parameter_types]
+    | IDENT
 
 
-fn_decl: FUNCTION IDENT parameters
+parameter_types: pos_parameter_types {kw_parameter_type}
+
+
+pos_parameter_types: {IDENT} ['?' 1{IDENT}]
+
+
+kw_parameter_type: (KEYWORD | OPT_KEYWORD) pos_parameter_types
+
+
+vartype: IDENT IS type NEWLINES
+       | DIM IDENT 1{'[' const_expr ']'} NEWLINES
+
+
+fn_decl: FUNCTION IDENT parameters [RETURNING 1{IDENT}]
          {typedef}
          {vartype}
          {statement}
-         {labeled_block}
 
 
-seb_decl: SUBROUTINE IDENT parameters
+sub_decl: SUBROUTINE IDENT parameters
           {typedef}
           {vartype}
           {statement}
-          {labeled_block}
 
 
-labeled_block: LABEL IDENT {parameter} NEWLINES
+parameters: pos_parameters {kw_parameter}
+
+
+pos_parameters: {IDENT} ['?' 1{IDENT}]
+
+
+kw_parameter: (KEYWORD | OPT_KEYWORD) pos_parameters
+
+
+labeled_block: LABEL IDENT parameters NEWLINES
+               {typedef}
+               {vartype}
                {statement}
-
-
-parameters: {parameter} {KEYWORD 1{parameter}}
-
-
-parameter: IDENT ['=' const_expr]
 
 
 statement: simple_statement NEWLINES
@@ -66,21 +81,26 @@ statement: simple_statement NEWLINES
 
 
 simple_statement: PASS
-                | primary arguments [RETURNING_TO: primary]
+                | CONTINUE
                 | PREPARE primary arguments
                 | REUSE primary [RETURNING_TO: primary]
                 | RELEASE primary
-                | SET lvalue TO: primary
-                | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
                 | GOTO primary {primary}
-                | RETURN {primary} [TO: primary]
+                | SET lvalue TO: primary
+                | RETURN {primary} [FROM: primary] [TO: primary]
+                | primary arguments [RETURNING_TO: primary]
+                | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
 
 
 dlt: '====' NEWLINE
-     1{expr '|' {'Y'|'N'|'-'} NEWLINE}
+     1{'|' {'Y'|'N'|'-'} '|' expr NEWLINES}
      '====' NEWLINE
-     1{simple_statement ['|' {'X'|' '}] NEWLINE}
-     '====' NEWLINE
+     1{action NEWLINES}
+     '====' NEWLINES
+
+
+action : '|' {'X'|' '} '|' [simple_statement]
+       | simple_statement
 
 
 lvalue: IDENT
@@ -104,6 +124,7 @@ expr: primary
     | expr '>=' expr
     | expr '>~=' expr
     | expr '==' expr
+    | expr '~=' expr
     | expr '!=' expr
     | expr '<>' expr
     | expr '!~=' expr
@@ -114,8 +135,10 @@ primary: STRING | FLOAT | INTEGER | BOOL | IDENT
        | '(' expr ')'
        | primary '.' IDENT
        | primary '[' expr ']'
+       | GOT? KEYWORD
+       | GOT? IDENT
        | '{' primary arguments '}'
 
 
-arguments: {primary} {KEYWORD 1{primary}}
+arguments: {primary} {KEYWORD {primary}}
 

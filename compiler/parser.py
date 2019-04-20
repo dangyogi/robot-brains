@@ -62,7 +62,7 @@ def p_first(p):
             | IDENT
     statement : simple_statement newlines
               | dlt
-    pos_arguments : pos1_arguments
+    parameter_types_list : parameter_types_list1
     opmode_type : AUTONOMOUS
                 | TELEOP
     type : IDENT
@@ -96,6 +96,7 @@ def p_none(p):
     decls :
           | decls fn_decl
           | decls sub_decl
+          | decls labeled_block
     parameters : pos_parameters kw_parameters
     pos_parameters : required_parameters
     pos_parameters : required_parameters '?' optional_parameters
@@ -108,12 +109,10 @@ def p_none(p):
     uses :
          | uses use
     fn_decl : FUNCTION fn_name parameters set_returning_opt newlines \
-              typedefs vartypes first_block labeled_blocks
+              typedefs vartypes first_block
     sub_decl : SUBROUTINE sub_name parameters newlines \
-               typedefs vartypes first_block labeled_blocks
+               typedefs vartypes first_block
     first_block :
-    labeled_blocks :
-    labeled_blocks : labeled_blocks labeled_block
     labeled_block : LABEL labeled_block_name parameters newlines \
                     typedefs vartypes first_block
     from_opt :
@@ -125,7 +124,7 @@ def p_1tuple(p):
     '''
     conditions : condition
     actions : action
-    pos1_arguments : primary
+    parameter_types_list1 : IDENT
     statements1 : statement
     idents : IDENT
     dimensions : dimension
@@ -140,9 +139,9 @@ def p_append(p):
     conditions : conditions condition
     actions : actions action
     idents : idents IDENT
-    pos1_arguments : pos1_arguments primary
+    pos_arguments : pos_arguments primary
     kw_parameter_types : kw_parameter_types kw_parameter_type
-    parameter_types_list : parameter_types_list IDENT
+    parameter_types_list1 : parameter_types_list1 IDENT
     primarys : primarys primary
     dimensions : dimensions dimension
     '''
@@ -161,7 +160,7 @@ def p_dimension(p):
 def p_all(p):
     """
     arguments : pos_arguments kw_arguments
-    kw_argument : KEYWORD pos1_arguments
+    kw_argument : KEYWORD pos_arguments
     expr : NOT expr
          | expr '^' expr
          | expr '*' expr
@@ -204,7 +203,7 @@ def p_pos_parameter_types1(p):
 
 def p_pos_parameter_types2(p):
     '''
-    pos_parameter_types : parameter_types_list '?' parameter_types_list
+    pos_parameter_types : parameter_types_list '?' parameter_types_list1
     '''
     p[0] = p[1], p[3]
 
