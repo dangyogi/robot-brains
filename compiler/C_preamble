@@ -7,19 +7,24 @@
 
 
 
-struct routine_descriptor_s {
+struct label_descriptor_s {
     /////////////// initialized outside of main:
     char *name;
     char type;                  // 'S' 'F', or 'L'
     int num_param_blocks;
 
     // first param_block_descriptor is always positional parameters
+    // initialized as: (struct param_block_descriptor_s []){ ... }
     struct param_block_descriptor_s *param_block_descriptors;
 
-    int routine_offset;         // from start of module instance
+    int flags_offset;           // from start of module instance to flags.
+                                // flags has PREPARED, RUNNING, kw_passed,
+                                // param_passed bits.
+
+    int ret_pointer_offset;     // from start of module instance.
 
     /////////////// initialized in module init:
-    void *start_label;          // set in routine init code
+    void *start_label;          // set in label init code
 };
 
 
@@ -29,47 +34,38 @@ struct param_block_descriptor_s {    // initialized outside main
                                 // LABEL name for Labeled_block params
     int num_params;             // required and optional
     int num_required_params;
-    int defaults_size;          // bytes
-    void *defaults_block;       // initialized as &(struct param_block_s){...}
-    int *param_offsets;         // from start of routine instance,
+    int num_optional_params;
+    int *param_offsets;         // from start of module instance,
                                 // indexed by parameter number (starting with 0)
                                 // initialized as (int []){...}
-};
-
-
-struct use_descriptor_s {       // initialized outside main
-    char *alias_name;           
-    int offset;                 // from start of containing module to
-                                // used module instance.
+    unsigned long keyword_mask; // 0 if required keyword
+    unsigned long *param_masks; // passed masks for optional parameters
+                                // indexed by optional parameter number
+                                //   (starting with 0)
+                                // initialized as (unsigned long []){...}
 };
 
 
 struct module_descriptor_s {    // initialized outside main
     char *name;
     char *filename;
-    int num_uses;
-    int num_routines;
+    int num_labels;
 
-    // initialized as (struct use_descriptor_s []){{...}, {...}}
-    struct use_descriptor_s *uses;
-
-    // initialized as {&routine_desc, ...}
-    struct routine_descriptor_s *routines[];
+    // initialized as {&label_desc, ...}
+    struct label_descriptor_s *labels[];
 };
 
 
-struct routine_pointer_s {
-    struct routine_instance_s *ret_context;
-    struct routine_descriptor_s *descriptor;
+struct label_pointer_s {
+    struct module_instance_s *module;
+    struct label_descriptor_s *descriptor;
 };
 
 
-struct routine_instance_s {
-    struct routine_descriptor_s *descriptor;
-    void *global;                       // points to parent module instance
-    unsigned long flags;
+struct module_instance_s {      // shared by all module instances
+    struct module_descriptor_s *descriptor;
+    unsigned long flags;        // marking variable initialization
     unsigned long lineno;
-    struct routine_pointer_s ret_pointer;
 };
 
 

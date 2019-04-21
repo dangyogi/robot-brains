@@ -28,14 +28,14 @@ function get_subroutines_by_name name$ returning p_config_t
     # FIX: how to make this optional?
     c_config p_next: p_next next_routine: p_done
     set imodule_index to: 0
-    set iroutine_index to: 0
+    set ilabel_index to: 0
     return
 
   label next_module
     ======================================================================
     | YN | imodule_index < {get_num_modules}
     ======================================================================
-    | X  | set iroutine_index to: 0
+    | X  | set ilabel_index to: 0
     |    | goto next_routine
     |  X | done with: get_subroutine_by_name
     |    | goto c_done
@@ -47,20 +47,19 @@ function get_subroutines_by_name name$ returning p_config_t
 
   label next_routine
     ======================================================================
-    | YN | iroutine_index < {get_num_routines imodule_index}
+    | YN | ilabel_index < {get_num_labels imodule_index}
     ======================================================================
-    | X  | goto check_name
+    | X  | continue
     |  X | goto next_module
     ======================================================================
 
-  label check_name
     ======================================================================
-    | YN | {get_routine_name imodule_index iroutine_index} == name$
+    | YN | {get_label_name imodule_index ilabel_index} == name$
     ======================================================================
-    | X  | set i to: iroutine_index
-    |    | iroutine_index += 1
-    |    | c_yield {get_routine imodule_index i}
-    |  X | iroutine_index += 1
+    | X  | set i to: ilabel_index
+    |    | ilabel_index += 1
+    |    | c_yield {get_label imodule_index i}
+    |  X | ilabel_index += 1
     |    | goto next_routine
     ======================================================================
 

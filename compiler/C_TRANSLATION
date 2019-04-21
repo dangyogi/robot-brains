@@ -1,62 +1,50 @@
 Descriptors:
 
-- routine_descriptor has:       // init outside of main (except for start_label)
+- label_descriptor has:       // init outside of main (except for start_label)
   - char *name
   - char type                   // 'S' or 'F'
-  - int num_params_blocks
+  - int num_param_blocks
   - param_block_descriptors *param_block_decriptors
-  - int routine_offset          // from start of module instance
-  - void *start_label;          // set in routine init
+  - int flags_offset            // from start of module instance
+  - int ret_pointer_offset      // from start of module instance
+  - void *start_label;          // set in label init
 
 - param_block_descriptor has:   // init outside of main
   - char *name;                 // "__pos__" for pos_params
   - int num_params;             // required and optional
   - int num_required_params;
-  - int defaults_size;          // bytes
-  - void *defaults_block;       // initialized as &(struct param_block_s){...}
+  - int num_optional_params;
   - int *param_offsets;         // indexed by num args passed
                                 // initialized as (int []){...}
-
-- use_descriptor has:           // init outside of main
-  - char *alias_name
-  - int offset                  // offset from start of containing module to
-                                // used module instance
+  - unsigned long kw_mask;      // 0 if required keyword
+  - unsigned long *param_masks; // indexed by optional param number
+                                // initialized as (unsigned long []){...}
 
 - module_descriptor has:        // init outside of main
   - char *name
   - char *filename
-  - int num_uses
-  - int num_routines
-  - use_descriptor *uses        // initialized as (use_descriptor []){{...}, }
-  - routine_descriptor *routines[] // initialized as {&routine_desc, ...}
+  - int num_labels
+  - label_descriptor *labels[]  // initialized as {&label_desc, ...}
 
 
 Instances:
 
 - label, sub_ret, fn_ret, sub and fn pointers have:
-  - struct routine_instance_s *context      // also serves as param_context
-  - routine_descriptor *descriptor
+  - struct module_instance_s *module   // also serves as param_context
+  - label_descriptor *descriptor
 
-- struct routine_instance_s has:   // shared by all routine instances
-  - routine_descriptor *descriptor // init outside of main
+- struct module_instance_s has:    // shared by all module instances
+  - module_descriptor *descriptor  // init outside of main
   - unsigned long flags            // initialized to 0 outside of main
-  - module_instance *global        // constant set in routine init C fun
   - unsigned long lineno
-  - ret pointer (above)
-
-- routine instance has:
-  - routine_instance_s
-  - parameters
-  - locals
-  - temps
-  - dlt_mask                            // optional
-
 
 - module instance has:
-  - module_descriptor *descriptor
+  - module_instance_s
   - "use" module instances              // init outside of main
-  - module parameter/variables          // init inside of main by init C fun
-  - routine instances                   // init outside of main
+  - module parameters
+  - variables
+  - label temps
+  - label dlt_masks
 
 
 - opmode_instance opmode                // global variable
@@ -66,31 +54,34 @@ Instances:
 SOURCE FILE LAYOUT:
 
 - built-in types
-- all struct definitions
-  - routine instance structs before their module_structs
+- all module instance struct definitions
   - used module instance structs before using module instance structs
 - all descriptors
-  - param_block_descriptors before their routine_descriptors
-  - routine_descriptors before their module_descriptors
-- module init C functions (take module params as C params)
-  - initialize module parameters/variables
-  - call module inits for used modules
-  - init all contained routines
+  - label_descriptors before their module_descriptors
 - top-level opmode instance declaration
 - builtins declaration
+- int num_modules constant
+- module instance * list (bottom-up "uses" order)
 
 - "main"
-  - struct routine_instance_s *current_routine;
+  - struct module_instance_s *current_module;
   - init descriptors
   - call builtin_init
   - call top-level opmode_init
   - call cycle.run
   - return 0
+  - init code for each module (not instance)
+    - initialize module parameters/variables
+    - initialize module flags
+    - call module inits for used modules
+    - init all contained labels
   - code for each module (not instance)
     - code for each routine in that module (not instance)
   - built-in code
-    - get_subroutines_by_name(routine_name$) -> TYPE SUBROUTINE generator
-      - in bottom up order
+    - get_num_modules
+    - get_num_labels module_index
+    - get_label_name module_index label_index
+    - get_label module_index label_index
 
 
 EXECUTABLE CODE:
@@ -99,35 +90,29 @@ EXECUTABLE CODE:
   - uses jump labels and gcc &&label within the routines.
 
 - goto (passes params, no return, might be to pointer)
-  - check running set in label_context.flags
+  - check running set in label_flags
   - pointer is label_pointer, otherwise info known at compile time
   - steps:
     - store parameters
-    - memcpy defaults                     // can be skipped if known label with
-                                          // no defaults
-    - restore label_context               // can be skipped if known label in
-                                          // same context
-    - goto *label
+    - set passed bits
+    - restore current_module              // can be skipped if known label in
+                                          // same module
+    - goto *start_label
 
 - return
   - check my running flag
   - set params through *param_block
   - reset my running flag
-  - restore context
-  - goto label
+  - restore current_module
+  - goto *start_label
 
 - call
   - check not remote prepared
   - check and set remote running flag
   - for each param_block:
     - set params to remote param_block
-    - memcpy defaults                     // can be skipped if known routine
-                                          // with no defaults on this
-                                          // param_block.
+    - set passed bits
   - call routine
-    - if calling a fn:
-      - store context in remote param_context
-      - store param_block_descriptor
-    - store context in remote ret_info.context
-    - store ret_label
-    - goto start_label
+    - store current_module in remote ret_pointer.module
+    - store label_descriptor for ret_label in remote ret_pointer.descriptor
+    - goto *start_label

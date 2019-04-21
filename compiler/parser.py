@@ -13,6 +13,8 @@ from symtable import (
     Subroutine, Function, Use, Typedef, Labeled_block, Block,
     DLT, Conditions, Actions, Variable, Required_parameter, Optional_parameter,
     Statement, Call_statement, Opeq_statement,
+    Literal, Variable_ref, Dot, Subscript, Got_keyword, Got_param, Call_fn,
+    Unary_expr, Binary_expr, Builtin_type, Typename_type, Label_type,
 )
 
 
@@ -50,22 +52,16 @@ def p_empty_tuple(p):
 
 def p_first(p):
     '''
-    const_expr : STRING
-               | FLOAT
-               | INTEGER
-               | BOOL
+    const_expr : STRING_LIT
+               | FLOAT_LIT
+               | INTEGER_LIT
+               | BOOLEAN_LIT
     expr : primary
-    primary : STRING
-            | FLOAT
-            | INTEGER
-            | BOOL
-            | IDENT
     statement : simple_statement newlines
               | dlt
     parameter_types_list : parameter_types_list1
     opmode_type : AUTONOMOUS
                 | TELEOP
-    type : IDENT
     '''
     p[0] = p[1]
 
@@ -148,27 +144,105 @@ def p_append(p):
     p[0] = p[1] + (p[2],)
 
 
+def p_all(p):
+    """
+    arguments : pos_arguments kw_arguments
+    kw_argument : KEYWORD pos_arguments
+    lvalue : primary '.' IDENT
+    lvalue : primary '[' expr ']'
+    parameter_types : pos_parameter_types kw_parameter_types
+    kw_parameter_type : KEYWORD pos_parameter_types
+    kw_parameter_type : OPT_KEYWORD pos_parameter_types
+    from_opt : FROM primary
+    """
+    p[0] = tuple(p[1:])
+
+
+def p_label_type(p):
+    """
+    type : FUNCTION taking_opt returning_opt
+         | SUBROUTINE taking_opt
+         | LABEL taking_opt
+    """
+    p[0] = Label_type(p[1:])
+
+
+def p_builtin_type(p):
+    """
+    type : INTEGER
+         | FLOAT
+         | BOOLEAN
+         | STRING
+         | MODULE
+    """
+    p[0] = Builtin_type(p[1].value)
+
+
+def p_typename(p):
+    "type : IDENT"
+    p[0] = Typename_type(p[1])
+
+
 def p_dimension(p):
     '''
     dimension : '[' const_expr ']'
     '''
     if not isinstance(p[2], int):
         syntax_error("Must have integer DIM", p[2].lexpos, p[2].lineno)
-    p[0] = (p[2],)
+    p[0] = p[2]
 
 
-def p_all(p):
+def p_primary_literal(p):
     """
-    arguments : pos_arguments kw_arguments
-    kw_argument : KEYWORD pos_arguments
+    primary : STRING_LIT
+            | FLOAT_LIT
+            | INTEGER_LIT
+            | BOOLEAN_LIT
+    """
+    p[0] = Literal(p[1])
+
+
+def p_primary_ident(p):
+    "primary : IDENT"
+    p[0] = Variable_ref(p[1])
+
+
+def p_primary_dot(p):
+    "primary : primary '.' IDENT"
+    p[0] = Dot(p[1], p[3])
+
+
+def p_primary_subscript(p):
+    "primary : primary '[' expr ']'"
+    p[0] = Subscript(p[1], p[3])
+
+
+def p_primary_got_keyword(p):
+    "primary : GOT KEYWORD"
+    p[0] = Got_keyword(p[2])
+
+
+def p_primary_got_param(p):
+    "primary : GOT IDENT"
+    p[0] = Got_param(p[2])
+
+
+def p_unary_expr(p):
+    """
     expr : NOT expr
-         | expr '^' expr
+         | '-' expr               %prec UMINUS
+    """
+    p[0] = Unary_expr(p[1], p[2])
+
+
+def p_binary_expr(p):
+    """
+    expr : expr '^' expr
          | expr '*' expr
          | expr '/' expr
          | expr '%' expr
          | expr '+' expr
          | expr '-' expr
-         | '-' expr               %prec UMINUS
          | expr '<' expr
          | expr LEQ expr
          | expr LAEQ expr
@@ -179,21 +253,8 @@ def p_all(p):
          | expr AEQ expr
          | expr NEQ expr
          | expr NAEQ expr
-    primary : primary '.' IDENT
-            | primary '[' expr ']'
-            | GOT KEYWORD
-            | GOT IDENT
-    lvalue : primary '.' IDENT
-    lvalue : primary '[' expr ']'
-    parameter_types : pos_parameter_types kw_parameter_types
-    kw_parameter_type : KEYWORD pos_parameter_types
-    kw_parameter_type : OPT_KEYWORD pos_parameter_types
-    type : FUNCTION taking_opt returning_opt
-         | SUBROUTINE taking_opt
-         | LABEL taking_opt
-    from_opt : FROM primary
     """
-    p[0] = tuple(p[1:])
+    p[0] = Binary_expr(p[1], p[2], p[3])
 
 
 def p_pos_parameter_types1(p):
@@ -250,7 +311,7 @@ def p_const_bool_expr_uminus(p):
     const_expr : NOT const_expr
     """
     if not isinstance(p[2], bool):
-        syntax_error("Must have bool operand for unary NOT",
+        syntax_error("Must have boolean operand for unary NOT",
                      p[2].lexpos, p[2].lineno)
     p[0] = not p[2]
 
@@ -325,7 +386,7 @@ def p_primary(p):
     '''
     primary : '{' primary arguments '}'
     '''
-    p[0] = ('call_fn', p[2], p[3])
+    p[0] = Call_fn(p[2], p[3])
 
 
 def p_make_opmode(p):
@@ -358,12 +419,12 @@ def p_optional_parameter(p):
 
 def p_keyword(p):
     'keyword : KEYWORD'
-    current_namespace().kw_parameter(p[1])
+    last_parameter_obj().kw_parameter(p[1])
 
 
 def p_opt_keyword(p):
     "keyword : OPT_KEYWORD"
-    current_namespace().kw_parameter(p[1], optional=True)
+    last_parameter_obj().kw_parameter(p[1], optional=True)
 
 
 def p_use1(p):
@@ -550,8 +611,7 @@ def find_module(ref_token, path):
     full_name = _find_module(ref_token.value, path)
     if full_name is None:
         syntax_error(f"module {ref_token.value} not found",
-                     ref_token.lexpos, ref_token.lineno, ref_token.filename,
-                     ref_token.namespace)
+                     ref_token.lexpos, ref_token.lineno, ref_token.filename)
     return full_name
 
 

@@ -20,7 +20,7 @@ def set_expanded_kws(value):
 
 class Token:
     def __init__(self, lex_token, value=None, type=None, lexpos=None,
-                 lineno=None, filename=None, namespace=None):
+                 lineno=None, filename=None):
         if value is None:
             self.value = lex_token.value
         else:
@@ -35,10 +35,6 @@ class Token:
             self.filename = lexer.filename
         else:
             self.filename = filename
-        if namespace is None and Namespaces:
-            self.namespace = Namespaces[-1]
-        else:
-            self.namespace = namespace
 
     def __repr__(self):
         return (f"<Token {self.value!r}"
@@ -49,10 +45,13 @@ class Token:
 reserved = frozenset((
     'AS',
     'AUTONOMOUS',
+    'BOOLEAN',
     'CONTINUE',
     'DIM',
+    'FLOAT',
     'FUNCTION',
     'GOTO',
+    'INTEGER',
     'IS',
     'LABEL',
     'MODULE',
@@ -65,6 +64,7 @@ reserved = frozenset((
     'RETURNING',
     'REUSE',
     'SET',
+    'STRING',
     'SUBROUTINE',
     'TAKING',
     'TELEOP',
@@ -74,18 +74,18 @@ reserved = frozenset((
 
 tokens = (
     'AEQ',
-    'BOOL',
+    'BOOLEAN_LIT',
     'DLT_DELIMITER',
     'DLT_MAP',
     'DLT_MASK',
     'EQ',
-    'FLOAT',
+    'FLOAT_LIT',
     'FROM',      # FROM:  expanded_kw
     'GAEQ',
     'GEQ',
     'GOT',
     'IDENT',
-    'INTEGER',
+    'INTEGER_LIT',
     'KEYWORD',
     'LAEQ',
     'LEQ',
@@ -95,7 +95,7 @@ tokens = (
     'OPEQ',
     'OPT_KEYWORD',
     'RETURNING_TO',
-    'STRING',
+    'STRING_LIT',
     'TO',        # TO:  expanded_kw
 
 ) + tuple(reserved)
@@ -187,7 +187,7 @@ def t_NEWLINE(t):
     return t
 
 
-def t_FLOAT(t):
+def t_FLOAT_LIT(t):
     r'''(?P<num>[-+]?(\d+\.\d*([eE][-+]?\d+)?
               |\.\d+([eE][-+]?\d+)?
               |\d+[eE][-+]?\d+))(?P<conv>[a-zA-Z%]+(^\d+)?(/[a-zA-Z]+(^\d+)?)?)?
@@ -201,7 +201,7 @@ def t_FLOAT(t):
     return t
 
 
-def t_INTEGER(t):
+def t_INTEGER_LIT(t):
     r'(?P<num>[-+]?\d+)(?P<conv>[a-zA-Z%]+(^\d+)?(/[a-zA-Z]+(^\d+)?)?)?'
     conv = t.lexer.lexmatch.group('conv')
 
@@ -209,20 +209,20 @@ def t_INTEGER(t):
     ans = int(t.lexer.lexmatch.group('num')) * convert(conv, t.lexpos, t.lineno)
 
     if isinstance(ans, float):
-        t.type = 'FLOAT'
+        t.type = 'FLOAT_LIT'
         t.value = float(ans)
     elif isinstance(ans, Fraction):
         if ans.denominator == 1:
             t.value = int(ans)
         else:
-            t.type = 'FLOAT'
+            t.type = 'FLOAT_LIT'
             t.value = float(ans)
     else:
         t.value = ans
     return t
 
 
-def t_STRING(t):
+def t_STRING_LIT(t):
     r'"([^"]*|"")*"'
     t.value = t.value[1:-1].replace('""', '"')
     return t
@@ -262,14 +262,14 @@ def t_BOOL_IDENT(t):
     uname = t.value.upper()
     if uname == 'TRUE?':
         t.value = True
-        t.type = 'BOOL'
+        t.type = 'BOOLEAN_LIT'
     elif uname == 'FALSE?':
         t.value = False
-        t.type = 'BOOL'
+        t.type = 'BOOLEAN_LIT'
     elif uname == 'GOT?':
         t.type = 'GOT'
     else:
-        t.value = Token(t, type='bool')
+        t.value = Token(t, type='boolean')
         t.type = 'IDENT'
     return t
 
@@ -282,10 +282,10 @@ def t_INT_IDENT(t):
     elif upper in scales:
         t.value = scales[upper]
         if isinstance(t.value, int):
-            t.type = 'INTEGER'
+            t.type = 'INTEGER_LIT'
         else:
             t.value = float(t.value)
-            t.type = 'FLOAT'
+            t.type = 'FLOAT_LIT'
     else:
         t.value = Token(t, type='integer')
         t.type = 'IDENT'
@@ -300,13 +300,13 @@ def t_FLOAT_IDENT(t):
     elif upper in scales:
         t.value = scales[upper]
         if isinstance(t.value, int):
-            t.type = 'INTEGER'
+            t.type = 'INTEGER_LIT'
         else:
             t.value = float(t.value)
-            t.type = 'FLOAT'
+            t.type = 'FLOAT_LIT'
     elif upper == 'PI':
         t.value = math.pi
-        t.type = 'FLOAT'
+        t.type = 'FLOAT_LIT'
     else:
         t.value = Token(t, type='float')
         t.type = 'IDENT'
@@ -447,15 +447,11 @@ def find_line(lexpos, lexdata=None):
         return lexdata[start:end + 1]
 
 
-def syntax_error(msg, lexpos, lineno, filename = None, namespace=None):
+def syntax_error(msg, lexpos, lineno, filename = None):
     global Num_errors
 
     print(f'File "{filename or lexer.filename}", line {lineno}',
-          end='', file=sys.stderr)
-    if namespace or Namespaces:
-        print(f', in {namespace or Namespaces[-1]}', file=sys.stderr)
-    else:
-        print(file=sys.stderr)
+          file=sys.stderr)
     if filename is None or filename == lexer.filename:
         #print("syntax_error using lexer.lexdata")
         lexdata = lexer.lexdata

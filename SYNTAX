@@ -34,6 +34,7 @@ type: FUNCTION [TAKING parameter_types] [RETURNING 1{IDENT}]
     | SUBROUTINE [TAKING parameter_types]
     | LABEL [TAKING parameter_types]
     | IDENT
+    | MODULE
 
 
 parameter_types: pos_parameter_types {kw_parameter_type}

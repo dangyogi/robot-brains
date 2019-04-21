@@ -32,6 +32,7 @@ subroutine run
 
 subroutine run_all name$
     next_subr is subr_t
+    p_config is p_config_t
 
     set i_current to: 0
     set i_next to: 1
@@ -50,6 +51,8 @@ subroutine run_all name$
 subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
     # This only gets called while the producer is still active, so always
     # update what_next.
+    p_next is label_t
+    p_done is subr_t
     set what_next to: p_next 
     return
 

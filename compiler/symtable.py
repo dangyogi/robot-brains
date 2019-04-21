@@ -26,7 +26,7 @@ class Symtable:
     Defines dump.
     '''
     def dump(self, f, indent=0):
-        print(f"{indent_str(indent)}{self.__class__.__name__} ", end='', file=f)
+        print(f"{indent_str(indent)}{self.__class__.__name__}", end='', file=f)
         self.dump_details(f)
         print(file=f)
         self.dump_contents(f, indent + 2)
@@ -45,6 +45,9 @@ class Entity(Symtable):
         self.name = ident
         self.set_in_namespace()
 
+    def __repr__(self):
+        return f"<{self.__class__.__name__} {self.name.value}>"
+
     def set_in_namespace(self):
         self.parent_namespace = current_namespace()
         self.parent_namespace.set(self.name, self)
@@ -53,7 +56,7 @@ class Entity(Symtable):
         super().dump_details(f)
         print(f" {self.name.value}", end='', file=f)
 
-    def prepare(self, opmode):
+    def prepare(self, opmode, module):
         pass
 
     def gen_prep(self, generator):
@@ -87,23 +90,37 @@ class Variable(Entity):
             self.explicit_typedef = True
             # self.type set in loop below
         else:
-            self.type = ident.type
+            self.type = Builtin_type(ident.type)
         for k, v in kws.items():
             setattr(self, k, v)
+        self.parameter_list = []        # list of parameters using this Variable
+        assert current_namespace().name != 'builtins' or ident.value != 'p_config'
 
     def dump_details(self, f):
         super().dump_details(f)
         print(f" type={self.type}", end='', file=f)
+
+    def prepare(self, opmode, module):
+        super().prepare(opmode, module)
+        if not self.dimensions:
+            self.set_bit = module.next_set_bit
+            module.next_set_bit += 1
+        self.type.prepare(opmode, module)
 
 
 class Required_parameter(Symtable):
     def __init__(self, ident):
         self.name = ident
         self.variable = current_namespace().make_variable(ident)
+        self.variable.parameter_list.append(self)
         Last_parameter_obj.pos_parameter(self)
+
+    def __repr__(self):
+        return f"<{self.__class__.__name__} {self.name.value}>"
 
     def dump_details(self, f):
         super().dump_details(f)
+        print(' ', self.name.value, sep='', end='', file=f)
         if hasattr(self, 'param_pos_number'):
             print(f" param_pos_number={self.param_pos_number}", end='', file=f)
 
@@ -118,8 +135,11 @@ class Use(Entity):
         self.module_name = module_name
         self.arguments = arguments
 
-    def prepare(self, opmode):
-        super().prepare(opmode)
+    def __repr__(self):
+        return f"<Use {self.name.value} {self.module_name}>"
+
+    def prepare(self, opmode, module):
+        super().prepare(opmode, module)
         self.module = opmode.modules_seen[self.module_name.value]
 
     def dump_details(self, f):
@@ -128,20 +148,60 @@ class Use(Entity):
 
 
 class Typedef(Entity):
-    r'''definition is either:
+    r'''type is either:
 
        (FUNCTION, taking_opt, returning_opt)
     or (SUBROUTINE, taking_opt)
     or (LABEL, taking_opt)
     or IDENT
+    or MODULE
     '''
-    def __init__(self, ident, definition):
+
+    is_module = False
+
+    def __init__(self, ident, type):
         Entity.__init__(self, ident)
-        self.definition = definition
+        self.type = type
+
+    def __repr__(self):
+        return f"<Typedef {self.name.value} {self.type}>"
 
     def dump_details(self, f):
         super().dump_details(f)
-        print(f" definition={self.definition}", end='', file=f)
+        print(f" type={self.type}", end='', file=f)
+
+    def prepare(self, opmode, module):
+        super().prepare(opmode, module)
+        self.type.prepare(opmode, module)
+
+
+class Type(Symtable):
+    def prepare(self, opmode, module):
+        pass
+
+
+class Builtin_type(Type):
+    def __init__(self, name):
+        self.name = name  # str
+
+
+class Typename_type(Type):
+    def __init__(self, ident):
+        self.ident = ident
+
+    def prepare(self, opmode, module):
+        super().prepare(opmode, module)
+        self.typedef = lookup(self.ident, module, opmode)
+        if not isinstance(self.typedef, Typedef):
+            scanner.syntax_error("Must be defined as a TYPE, "
+                                   f"not a {self.typedef.__class__.__name__}",
+                                 self.ident.lexpos, self.ident.lineno,
+                                 self.ident.filename)
+
+
+class Label_type(Type):
+    def __init__(self, type):
+        self.type = type
 
 
 class Param_block(Symtable):
@@ -151,8 +211,14 @@ class Param_block(Symtable):
         self.optional_params = []
         self.optional = optional
 
-    def dump(self, f, indent=0):
-        print(indent_str(indent), self.name, " Parameters:", sep='', file=f)
+    def dump_details(self, f):
+        super().dump_details(f)
+        print(' ', self.name, sep='', end='', file=f)
+        if self.optional:
+            print(" optional", end='', file=f)
+
+    def dump_contents(self, f, indent):
+        super().dump_contents(f, indent)
         for p in self.required_params:
             p.dump(f, indent+2)
         for p in self.optional_params:
@@ -163,13 +229,22 @@ class Param_block(Symtable):
             param.param_pos_number = \
               len(self.required_params) + len(self.optional_params)
             self.optional_params.append(param)
-        else:
-            if self.optional_params:
-                scanner.syntax_error("Required parameter may not follow "
-                                     "default parameter",
-                                     param.name.lexpos, param.name.lineno)
+        else:  # required parameter
+            assert not self.optional_params
             param.param_pos_number = len(self.required_params)
             self.required_params.append(param)
+
+    def assign_passed_bits(self, next_bit_number):
+        def get_bit_number():
+            nonlocal next_bit_number
+            ans = next_bit_number
+            next_bit_number += 1
+            return ans
+        if self.optional:
+            self.kw_passed_bit = get_bit_number()
+        for p in self.optional_params:
+            p.passed_bit = get_bit_number()
+        return next_bit_number
 
 
 class Namespace(Symtable):
@@ -181,12 +256,6 @@ class Namespace(Symtable):
 
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.name}>"
-
-    def prepare(self, opmode):
-        #print("Namespace.prepare", self.__class__.__name__, self.name)
-        super().prepare(opmode)
-        for obj in self.names.values():
-            obj.prepare(opmode)
 
     def lookup(self, ident, error_not_found=True):
         r'''Look up ident in self.names.
@@ -268,6 +337,7 @@ class Opmode(Namespace):
             # {module_name: module}
             # ... does not have lowered() keys!
             self.modules_seen = modules_seen
+        self.next_set_bit = 0
 
     def set_in_namespace(self):
         pass
@@ -286,6 +356,12 @@ class Opmode(Namespace):
                 print(f"{indent_str(indent)}{name}:", file=f)
                 module.dump(f, indent + 2)
 
+    def prepare(self, opmode):
+        #print("Namespace.prepare", self.__class__.__name__, self.name)
+        for obj in self.names.values():
+            obj.prepare(opmode, self)
+        print(self.name, "number of set bits used", self.next_set_bit)
+
     def gen_program(self, generator):
         self.gen_prep(generator)
         self.gen_structs(generator)
@@ -298,11 +374,12 @@ class With_parameters(Symtable):
     def __init__(self):
         global Last_parameter_obj
         self.pos_param_block = None
+        self.current_param_block = None
         self.kw_parameters = OrderedDict()      # {lname: Param_block}
         Last_parameter_obj = self
 
     def pos_parameter(self, param):
-        if self.pos_param_block is None:
+        if self.current_param_block is None:
             self.pos_param_block = Param_block()
             self.current_param_block = self.pos_param_block
         self.current_param_block.add_parameter(param)
@@ -312,15 +389,24 @@ class With_parameters(Symtable):
         if lname in self.kw_parameters:
             scanner.syntax_error("Duplicate keyword",
                                  keyword.lexpos, keyword.lineno)
-        self.current_param_block = self.kw_parameters[lname] \
-          = Param_block(keyword.value, optional)
+        self.current_param_block = self.kw_parameters[lname] = \
+          Param_block(keyword.value, optional)
 
     def dump_contents(self, f, indent):
-        if self.pos_param_block is not None:
-            self.pos_param_block.dump(f, indent)
-        for pb in self.kw_parameters.values():
+        for pb in self.gen_param_blocks():
             pb.dump(f, indent)
         super().dump_contents(f, indent)
+
+    def gen_param_blocks(self):
+        if self.pos_param_block is not None:
+            yield self.pos_param_block
+        yield from self.kw_parameters.values()
+
+    def assign_passed_bits(self):
+        next_bit_number = 0
+        for pb in self.gen_param_blocks():
+            next_bit_number = pb.assign_passed_bits(next_bit_number)
+        self.bits_used = next_bit_number
 
 
 class Module(Opmode, With_parameters):
@@ -342,13 +428,14 @@ class Labeled_block(Entity, With_parameters):
         Entity.__init__(self, ident)
         With_parameters.__init__(self)
 
+    def prepare(self, opmode, module):
+        self.assign_passed_bits()
+        super().prepare(opmode, module)
+        if self.block is not None:
+            self.block.prepare(opmode, module, self)
+
     def add_first_block(self, block):
         self.block = block
-
-    def dump_details(self, f):
-        super().dump_details(f)
-        if self.block is not None:
-            print(f" block {self.block}", end='', file=f)
 
     def dump_contents(self, f, indent):
         super().dump_contents(f, indent)
@@ -369,7 +456,7 @@ class Function(Subroutine):
 
     def __init__(self, ident):
         Subroutine.__init__(self, ident)
-        self.return_types = ident.type,
+        self.return_types = Builtin_type(ident.type),
 
     def set_return_types(self, return_types):
         self.return_types = return_types
@@ -389,6 +476,10 @@ class Block(Symtable):
     def dump_contents(self, f, indent):
         for s in self.statements:
             s.dump(f, indent)
+
+    def prepare(self, opmode, module, label):
+        for s in self.statements:
+            s.prepare(opmode, module, label)
 
     def gen_code(self, f, indent=0):
         for s in self.statements:
@@ -424,6 +515,17 @@ class Statement(Symtable):
         super().dump_details(f)
         print(f" lineno {self.lineno}", end='', file=f)
         print(f" {self.args}", end='', file=f)
+
+    def prepare(self, opmode, module, label):
+        def _prepare(obj):
+            if isinstance(obj, Symtable):
+                if not isinstance(obj, Variable):
+                    obj.prepare(opmode, module, label)
+            elif isinstance(obj, (list, tuple)):
+                for x in obj:
+                    _prepare(x)
+        for arg in self.args:
+            _prepare(arg)
 
     def gen_code(self, generator, indent):
         generator.reset_temps()
@@ -489,7 +591,7 @@ class Conditions(Symtable):
     self.dlt_mask is the dlt_mask Token (for future syntax errors).
     '''
     def __init__(self, conditions):
-        r'self.conditions is ((expr, rest), ...)'
+        r'conditions is ((mask, expr), ...)'
         self.compile_conditions(conditions)
 
     def compile_conditions(self, conditions):
@@ -576,6 +678,10 @@ class Conditions(Symtable):
                                  self.dlt_mask.lexpos + missing_columns[0],
                                  self.dlt_mask.lineno)
 
+    def prepare(self, opmode, module, label):
+        for expr in self.exprs:
+            expr.prepare(opmode, module, label)
+
     def gen_code(self, f, indent=0):
         prefix = indent_str(indent)
         print(f"{prefix}dlt_mask = 0", file=f)
@@ -591,7 +697,7 @@ class Actions(Symtable):
     self.blocks is [(dlt_map, [column_number], [statement])]
     '''
     def __init__(self, actions):
-        r'self.actions is ((dlt_map, statement), ...)'
+        r'actions is ((dlt_map, statement), ...)'
         self.compile_actions(actions)
 
     def compile_actions(self, actions):
@@ -623,8 +729,9 @@ class Actions(Symtable):
                     elif marker != ' ':
                         scanner.syntax_error("Column marker must be 'X' or ' '",
                                              dlt_map.lexpos + i, dlt_map.lineno)
-                self.blocks.append((dlt_map, column_numbers, [statement]))
-            else:
+                self.blocks.append((dlt_map, column_numbers,
+                                    ([] if statement is None else [statement])))
+            elif statement is not None:
                 self.blocks[-1][2].append(statement)
 
     def apply_offset(self, offset, num_columns):
@@ -650,6 +757,11 @@ class Actions(Symtable):
         # Return missing column_numbers.
         return sorted(frozenset(range(num_columns)) - seen)
 
+    def prepare(self, opmode, module, label):
+        for _, _, statements in self.blocks:
+            for statement in statements:
+                statement.prepare(opmode, module, label)
+
     def gen_code(self, f, indent=0):
         prefix = indent_str(indent)
         for _, column_numbers, statements in self.blocks:
@@ -664,15 +776,170 @@ class Actions(Symtable):
 
 class DLT(Symtable):
     def __init__(self, conditions, actions):
-        self.conditions = conditions
-        self.actions = actions
+        self.conditions = conditions    # Conditions instance
+        self.actions = actions          # Actions instance
         conditions.sync_actions(actions)
+
+    def prepare(self, opmode, module, label):
+        self.conditions.prepare(opmode, module, label)
+        self.actions.prepare(opmode, module, label)
 
     def gen_code(self, f, indent=0):
         self.conditions.gen_code(f, indent)
         self.actions.gen_code(f, indent)
 
 
+class Expr(Symtable):
+    def prepare(self, opmode, module, label):
+        pass
+
+
+class Literal(Expr):
+    def __init__(self, value):
+        self.value = value
+
+    def __repr__(self):
+        return f"<Literal {self.value!r}>"
+
+
+class Variable_ref(Expr):
+    def __init__(self, ident):
+        self.ident = ident
+
+    def __repr__(self):
+        return f"<Variable_ref {self.ident.value}>"
+
+    def prepare(self, opmode, module, label):
+        super().prepare(opmode, module, label)
+        self.referent = lookup(self.ident, module, opmode)
+
+
+class Dot(Expr):
+    def __init__(self, expr, ident):
+        self.expr = expr
+        self.ident = ident
+
+    def __repr__(self):
+        return f"<Dot {self.expr} {self.ident.value}>"
+
+    def prepare(self, opmode, module, label):
+        super().prepare(opmode, module, label)
+        self.expr.prepare(opmode, module, label)
+
+
+class Subscript(Expr):
+    def __init__(self, array_expr, subscript_expr):
+        self.array_expr = array_expr
+        self.subscript_expr = subscript_expr
+
+    def __repr__(self):
+        return f"<Subscript {self.array_expr} {self.subscript_expr}>"
+
+    def prepare(self, opmode, module, label):
+        super().prepare(opmode, module, label)
+        self.array_expr.prepare(opmode, module, label)
+        self.subscript_expr.prepare(opmode, module, label)
+
+
+class Got_keyword(Expr):
+    def __init__(self, keyword):
+        self.keyword = keyword
+
+    def __repr__(self):
+        return f"<Got_keyword {self.keyword}>"
+
+    def prepare(self, opmode, module, label):
+        super().prepare(opmode, module, label)
+        pb = label.kw_parameters.get(self.keyword.value.lower())
+        if pb is None:
+            scanner.syntax_error("Not found",
+                                 self.keyword.lexpos, self.keyword.lineno,
+                                 self.keyword.filename)
+        if not pb.optional:
+            scanner.syntax_error("Must be an optional keyword",
+                                 self.keyword.lexpos, self.keyword.lineno,
+                                 self.keyword.filename)
+        self.bit_number = pb.kw_passed_bit
+
+
+class Got_param(Expr):
+    def __init__(self, ident):
+        self.ident = ident
+
+    def __repr__(self):
+        return f"<Got_param {self.ident.value}>"
+
+    def prepare(self, opmode, module, label):
+        super().prepare(opmode, module, label)
+        pb = label.kw_parameters.get(self.keyword)
+        # FIX: Finish this
+
+
+class Call_fn(Expr):
+    def __init__(self, fn, arguments):
+        self.fn = fn
+        self.pos_arguments, self.kw_arguments = arguments
+
+    def __repr__(self):
+        return f"<Call_fn {self.fn} {self.pos_arguments} {self.kw_arguments}>"
+
+    def prepare(self, opmode, module, label):
+        super().prepare(opmode, module, label)
+        self.fn.prepare(opmode, module, label)
+        for expr in self.pos_arguments:
+            expr.prepare(opmode, module, label)
+        for _, pos_arguments in self.kw_arguments:
+            for expr in pos_arguments:
+                expr.prepare(opmode, module, label)
+
+
+class Unary_expr(Expr):
+    def __init__(self, operator, expr):
+        self.operator = operator
+        self.expr = expr
+
+    def __repr__(self):
+        return f"<Unary_expr {self.operator} {self.expr}>"
+
+    def prepare(self, opmode, module, label):
+        super().prepare(opmode, module, label)
+        self.expr.prepare(opmode, module, label)
+
+
+class Binary_expr(Expr):
+    def __init__(self, expr1, operator, expr2):
+        self.expr1 = expr1
+        self.operator = operator
+        self.expr2 = expr2
+
+    def __repr__(self):
+        return f"<Binary_expr {self.expr1} {self.operator} {self.expr2}>"
+
+    def prepare(self, opmode, module, label):
+        super().prepare(opmode, module, label)
+        self.expr1.prepare(opmode, module, label)
+        self.expr2.prepare(opmode, module, label)
+
+
 def indent_str(indent):
     return " "*indent
 
+
+def lookup(ident, module, opmode):
+    obj = module.lookup(ident, error_not_found=False)
+    if obj is not None:
+        return obj
+    obj = opmode.lookup(ident, error_not_found=False)
+    if obj is not None:
+        return obj
+    obj = opmode.modules_seen['builtins'].lookup(ident, error_not_found=False)
+    if obj is not None:
+        return obj
+
+    # FIX: Add check for get_num_modules, get_num_labels, get_label_name,
+    #                    get_label
+
+    # FIX: remove "if False:"
+    if False:
+        scanner.syntax_error("Not found",
+                             ident.lexpos, ident.lineno, ident.filename)
