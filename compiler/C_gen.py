@@ -208,20 +208,29 @@ def gen_program(opmode):
         print("// descriptors", file=C_file)
         do(gen_descriptors)
 
-        print("gen_init_fns ....")
-        print(file=C_file)
-        print(file=C_file)
-        print("// init_fns", file=C_file)
-        do(gen_init_fns)
-
         print(file=C_file)
         print(file=C_file)
         print("// instances", file=C_file)
-        print("gen opmode instance ....")
+        print("gen opmode and builtin module instances ....")
         gen_instance(opmode)
         print("gen builtins instance ....")
         builtins_module = opmode.modules_seen['builtins']
         gen_instance(builtins_module)
+
+        print(file=C_file)
+        print(file=C_file)
+        print("// modules_list", file=C_file)
+        print("modules_list ....")
+        instances = tuple(gen_instances(builtins_module)) \
+                  + tuple(gen_instances(opmode))
+        print(f"const int num_module_instances = {len(instances)};",
+              file=C_file)
+        print("const struct module_instance_s module_instances = {",
+              " // bottom-up order",
+              file=C_file)
+        for m in instances:
+            print(f"  (struct module_instance_s *)&{m},", file=C_file)
+        print("};", file=C_file)
 
         print("emit_code_start ....")
         print(file=C_file)
@@ -229,14 +238,17 @@ def gen_program(opmode):
         print("// code start", file=C_file)
         emit_code_start()
 
+        print("init descriptors ....")
         print(file=C_file)
         print(file=C_file)
         print("// init descriptors", file=C_file)
         do(init_descriptors)
 
+        # FIX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+        print("call init subroutines ....")
         print(file=C_file)
         print(file=C_file)
-        print("// call init routines", file=C_file)
+        print(prepare_statement("// call init routines"), file=C_file)
         print(file=C_file)
         print(prepare_statement(f"{builtins_module.C_init_C_fn_name}("
                                 f"&{builtins_module.C_global_name});"),
@@ -246,9 +258,10 @@ def gen_program(opmode):
                                 f"&{opmode.C_global_name});"),
               file=C_file)
 
+        print("call cycle.run ....")
         print(file=C_file)
         print(file=C_file)
-        print("// call cycle run", file=C_file)
+        print(prepare_statement("// call cycle run"), file=C_file)
         print(file=C_file)
 
         # find "cycle" module (look in opmode and builtins):
@@ -305,21 +318,26 @@ def gen_program(opmode):
                 f"goto {run_routine.C_start_label_name};"),
               file=C_file)
 
-
+        print("terminate_program_0 ....")
         print(file=C_file)
         print(file=C_file)
-        print("// all done!", file=C_file)
+        print(prepare_statement("// all done!"), file=C_file)
         print(file=C_file)
         print(prepare_label("terminate_program_0"), file=C_file)
         print(prepare_statement("return 0;"), file=C_file)
 
-
         print("write code ....")
         print(file=C_file)
         print(file=C_file)
-        print("// generated code", file=C_file)
+        print(prepare_statement("// generated code"), file=C_file)
         for line in lines:
             print(line, file=C_file)
+
+        print("gen_init_fns ....")
+        print(file=C_file)
+        print(file=C_file)
+        print(prepare_statement("// init_fns"), file=C_file)
+        do(gen_init_fns)
 
         print("emit_code_end ....")
         emit_code_end()
@@ -433,17 +451,9 @@ def gen_descriptors(module):
     print(file=C_file)
     print(f"struct module_descriptor_s {module.C_descriptor_name} = {{",
           file=C_file)
-    print(f'  "{module.name.value}",', file=C_file)
-    print(f'  "{module.filename}",', file=C_file)
-    uses = tuple(get_uses(module))
-    print(f'  {len(uses)}, // num_uses', file=C_file)
-    print(f'  {len(labels)}, // num_labels', file=C_file)
-    print('  (struct use_descriptor_s []){  // uses', file=C_file)
-    for u in uses:
-        print(f'    {{"{u.name.value}", '
-                f'offsetof(struct {module.C_struct_name}, {u.C_local_name})}},',
-              file=C_file)
-    print("  },", file=C_file)
+    print(f'  "{module.name}",  // name', file=C_file)
+    print(f'  "{module.filename}",  // filename', file=C_file)
+    print(f'  {len(labels)},  // num_labels', file=C_file)
     print('  {  // labels', file=C_file)
     for label in labels:
         print(f'    &{label.C_descriptor_name},', file=C_file)
@@ -455,28 +465,39 @@ def gen_label_descriptor(module, label):
     print(file=C_file)
     print(f"struct label_descriptor_s {label.C_descriptor_name} = {{",
           file=C_file)
-    print(f'  "{label.name.value}",', file=C_file)
-    type = 'F' if isinstance(label, symtable.Function) else 'S'
-    print(f"  '{type}',", file=C_file)
+    print(f'  "{label.name.value}",  // name', file=C_file)
+    if isinstance(label, symtable.Function):
+        type = 'F'
+    elif isinstance(label, symtable.Subroutine):
+        type = 'S'
+    else:
+        assert isinstance(label, symtable.Labeled_block)
+        type = 'L'
+    print(f"  '{type}',   // type", file=C_file)
     if label.pos_param_block is None:
         num_param_blocks = 0
     else:
         num_param_blocks = 1
+    num_param_blocks += len(label.kw_parameters)
     print(f'  {num_param_blocks},  // num_param_blocks', file=C_file)
     print('  (struct param_block_descriptor_s []){  // param_block_descriptors',
           file=C_file)
-    if label.pos_param_block is not None:
-        gen_param_desc(label, label.pos_param_block)
-    for kw_params in label.kw_parameters.values():
-        gen_param_desc(label, kw_params)
-    print("  },", file=C_file)
-    print(f'  offsetof(struct {module.C_struct_name}, {label.C_local_name}),'
-            '  // label_offset',
+    for pb in label.gen_param_blocks():
+        gen_param_desc(module, pb)
+    print("  },  // param_block_descriptors", file=C_file)
+    print(f'  offsetof(struct {module.C_struct_name}, {label.C_flags_name}),'
+            '  // flags_offset',
           file=C_file)
+    if isinstance(label, symtable.Subroutine):
+        print(f'  offsetof(struct {module.C_struct_name}, {label.C_ret_pointer_name}),'
+                '  // ret_pointer_offset',
+              file=C_file)
+    else:
+        print('  0,  // ret_pointer_offset', file=C_file)
     print("};", file=C_file)
 
 
-def gen_param_desc(label, param_block):
+def gen_param_desc(module, param_block):
     print('    {  // param_block_descriptor', file=C_file)
     print(f'      "{param_block.name}",  // name', file=C_file)
     num_params = len(param_block.required_params) \
@@ -484,36 +505,41 @@ def gen_param_desc(label, param_block):
     print(f'      {num_params},  // num_params', file=C_file)
     print(f'      {len(param_block.required_params)},  // num_required_params',
           file=C_file)
+    print(f'      {len(param_block.optional_params)},  // num_optional_params',
+          file=C_file)
 
     offsets = []
+    param_masks = []
 
     # add offsets to required_params
     for p in param_block.required_params:
-        offsets.append(f"offsetof(struct {routine.C_struct_name}, "
-                       f"{p.C_local_name})")
+        offsets.append(f"offsetof(struct {module.C_struct_name}, "
+                       f"{p.variable.C_local_name})")
 
-    # build default_block and offsets for optional_params
-    if not param_block.optional_params:
-        print(f'      0,  // defaults_size', file=C_file)
-        print(f'      NULL,  // defaults_block', file=C_file)
+    # add offsets and param_masks for optional_params
+    for p in param_block.optional_params:
+        offsets.append(f"offsetof(struct {module.C_struct_name}, "
+                       f"{p.variable.C_local_name})")
+        param_masks.append(p.passed_bit)
+
+    print('      (int []){', ', '.join(str(offset) for offset in offsets),
+          '},  // param_offsets',
+          sep='', file=C_file)
+
+    def make_mask(bit_number):
+        r'Returns the mask as a C literal (in string form)'
+        return hex(1 << (bit_number + 2))
+
+    if param_block.optional:
+        print(f'      {make_mask(param_block.kw_passed_bit)},  // keyword_mask',
+              file=C_file)
     else:
-        print(f'      sizeof(struct {param_block.optional_param_block_struct_name})'
-              ',  // defaults_size',
-              file=C_file)
-        default_block = []
-        current_offset = Sizeof_routine_instance_s
-        def append(t):
-            # FIX add default_block info
-            offsets.append(f"offsetof(struct {routine.C_struct_name}, "
-                           f"{p.C_local_name})")
-        for p in default_params:
-            append(p)
-        print(f'      &(struct {param_block.optional_param_block_struct_name})'
-              f'{{{", ".join(default_block)}}},  // defaults_block',
-              file=C_file)
-    print(f'      (int []){{{", ".join(offsets)}}},'
-          '  // param_offsets',
-          file=C_file)
+        print('      0,  // keyword_mask', file=C_file)
+    print('      (unsigned long []){',
+          ', '.join(make_mask(mask) for mask in param_masks),
+          '},  // param_masks',
+          sep='', file=C_file)
+
     print('    },', file=C_file)
 
 
@@ -548,6 +574,18 @@ def gen_structs(module):
             if obj.needs_dlt_mask:
                 _emit_struct_variable('unsigned long', obj.C_dlt_mask_name)
     emit_struct_end()
+
+
+def gen_instances(module):
+    for path in gen_module_instances(module):
+        yield f"{module.C_global_name}{path}"
+
+
+def gen_module_instances(module):
+    for use in get_uses(module):
+        for path in gen_module_instances(use.module):
+            yield f".{use.C_local_name}{path}"
+    yield ''
 
 
 def gen_init_fns(module):
@@ -723,7 +761,7 @@ def emit_code_start():
     print(file=C_file)
     print("int", file=C_file)
     print("main(int argc, char **argv, char **env) {", file=C_file)
-    print(symtable.indent_str(Label_indent),
+    print(symtable.indent_str(Statement_indent),
           "struct module_instance_s *current_module;",
           sep='', file=C_file)
 
@@ -834,7 +872,5 @@ def tsort_modules(opmode):
 
 def gen_dependencies(modules_seen):
     for m in modules_seen.values():
-        yield (m,
-               set(modules_seen[x.module_name.value]
-                   for x in m.names.values()
-                    if isinstance(x, symtable.Use)))
+        yield (m, set(modules_seen[x.module_name.value]
+                      for x in get_uses(m)))
