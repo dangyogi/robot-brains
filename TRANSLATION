@@ -1,0 +1,77 @@
+- All functions and subroutines from each module are combined into one method.
+
+- This method has a big switch statement encompasing all of the code generated
+  from all of the included functions.
+    - Each case in the switch statement is a "block" from one of the
+      functions.
+    - Each branch destination point (including return addresses) in the code
+      generates a new block.
+
+- Each module has a "struct" with its global variables.  This can be
+  instantiated multiple times (i.e., with different module parameters).
+
+- Each function/subroutine also has a struct.  This includes the function's
+  return address (!return), parameters and local variables.
+
+- The function/subroutine structs are included in their module's struct.
+    - Thus, each module instance has its own copy of each of its
+      function/subroutine structs.
+    - This allows the same function in two different instances of the same
+      module to be run at the same time.
+    - This means that blocks are shared between multiple function/subroutine
+      struct instances.
+        - Which means that the block has to know how to get to the proper
+          struct instance.
+            - So put all function blocks for each module into that module's
+              struct as a method.
+                - This method takes the case number to run and returns the next
+                  module instance, case number to its caller.
+                - The caller is a simple loop that keeps calling what is
+                  returned.
+
+- Then calling a function requires the following knowledge:
+    - Where to put the parameters (including the return address).
+    - What module instance the function is in.
+    - The switch case number for the function's starting block.
+        - Might have multiple entry points?
+
+- This constitutes a "function pointer".
+
+- This is the same information required for a function to return to.
+    - So the return info is just a function pointer.
+
+- So there are also structs for each return point expecting one or more return
+  values.
+
+- The return value is always the first parameter in each function/subroutine
+  struct.
+    - The return value and in-use flag(s) constitute the minimum function
+      struct.
+        - Each function's struct is derived from this common base class.
+
+- A "prepared" function checks to make sure the function isn't in use, then
+  loads all of the arguments into the function's struct.  All that is left
+  later is to load the return switch case number into the struct and jump to
+  its starting block.
+    - There are seperate "prepared" and "called" in-use flags for each
+      function.
+
+
+JAVA INHERITANCE STRUCTURE:
+
+public class Step {
+    public Module mod;
+    public int case_number;
+
+    public Step(Module m, int c) {
+        mod = m;
+        case_number = c;
+    }
+}
+
+public abstract class Module {
+    abstract Step run_step(int step_number);
+}
+
+public class Params {
+}

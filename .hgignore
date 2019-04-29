@@ -1,0 +1,10 @@
+syntax: glob
+
+parser.out
+parsetab.py
+venv
+__pycache__
+.*.swp
+.pyhist
+*.o
+a.out

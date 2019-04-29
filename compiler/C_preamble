@@ -1,0 +1,74 @@
+
+// offsetof
+#include <stddef.h>
+
+// memcpy
+#include <string.h>
+
+
+
+struct label_descriptor_s {
+    /////////////// initialized outside of main:
+    char *name;
+    char type;                  // 'S' 'F', or 'L'
+    int num_param_blocks;
+
+    // first param_block_descriptor is always positional parameters
+    // initialized as: (struct param_block_descriptor_s []){ ... }
+    struct param_block_descriptor_s *param_block_descriptors;
+
+    int flags_offset;           // from start of module instance to flags.
+                                // flags has PREPARED, RUNNING, kw_passed,
+                                // param_passed bits.
+
+    int ret_pointer_offset;     // from start of module instance.
+
+    /////////////// initialized in module init:
+    void *start_label;          // set in label init code
+};
+
+
+struct param_block_descriptor_s {    // initialized outside main
+    char *name;                 // "__pos__" for pos_params
+                                // KEYWORD name for kw_params
+                                // LABEL name for Labeled_block params
+    int num_params;             // required and optional
+    int num_required_params;
+    int num_optional_params;
+    int *param_offsets;         // from start of module instance,
+                                // indexed by parameter number (starting with 0)
+                                // initialized as (int []){...}
+    unsigned long keyword_mask; // 0 if required keyword
+    unsigned long *param_masks; // passed masks for optional parameters
+                                // indexed by optional parameter number
+                                //   (starting with 0)
+                                // initialized as (unsigned long []){...}
+};
+
+
+struct module_descriptor_s {    // initialized outside main
+    char *name;
+    char *filename;
+    int num_labels;
+
+    // initialized as {&label_desc, ...}
+    struct label_descriptor_s *labels[];
+};
+
+
+struct label_pointer_s {
+    struct module_instance_s *module;
+    struct label_descriptor_s *descriptor;
+};
+
+
+struct module_instance_s {      // shared by all module instances
+    struct module_descriptor_s *descriptor;
+    unsigned long flags;        // marking variable initialization
+    unsigned long lineno;
+};
+
+
+#define FLAG_RUNNING            0x01
+#define FLAG_PREPARED           0x02
+

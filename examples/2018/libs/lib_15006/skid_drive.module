@@ -1,0 +1,14 @@
+# skid_drive.module
+
+module left_motor: left_motor right_motor: right_motor
+
+
+subroutine stop
+    left_motor.set_power 0
+    right_motor.set_power 0
+
+
+subroutine move dist
+
+
+subroutine turn angle

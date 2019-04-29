@@ -1,0 +1,178 @@
+Iterators:
+
+  - consumer is last to die
+  - consumer has:
+    - LABEL C_YIELD x // called repeatedly by producer
+    - LABEL C_DONE    // called by producer at end-of-sequence, producer is dead
+    - SUB C_CONFIG p_next: p_next p_done: p_done p_config: p_config
+      - called at any time by producer to change P_ routines
+  - producer has:
+    - LABEL P_NEXT    // called repeatedly by consumer
+    - SUB P_DONE      // called by consumer to terminate early
+      - doesn't call C_DONE
+    - SUB P_CONFIG c_yield: c_yield c_done: c_done c_config: c_config
+      - called at any time by consumer to change C_ routines
+      - if c_config passed, call it!
+
+
+Start Up:
+    - call producer, which returns its p_config
+    - p_config is given to consumer (which is often the caller that created the
+      producer)
+      - consumer calls p_config c_yield c_done c_config
+        - now producer is initialized
+        - producer.p_config calls c_config p_next p_done [p_config]
+          - now consumer is initialized
+          - does p_config always call c_config each time it's passed???
+            - yes!
+          - does c_config always call p_config each time it's passed???
+            - no???
+      - consumer calls p_next to start the iteration
+
+
+Examples:
+
+- Tee
+
+          Producer, I  ->  Tee, T     ->  Consumer, A
+                                      +----------------->  Consumer, B
+p_next      -              I.p_next       T.p_next_2       I.p_next
+p_done      -              I.p_done       T.p_done_1       T.p_done_2
+p_config    -              I.p_config     T.p_config_1     T.p_config_2
+c_yield     T.c_yield      A/B.c_yield    -                -
+c_done      T.c_done       A/B.c_done     -                -
+c_config    T.c_config     A/B.c_config   -                -
+
+Startup:
+  - Tee init takes one p_config and returns two p_configs
+  - Tee may need a dummy p_next for Consumer A's first call to it.
+    - this would call A.c_config T.p_next_2, then pause(?) the thread
+
+T.c_yield x:  <-----------------------+
+  save x                              |
+  A.c_yield x        -> T.p_next_2    |
+T.p_next_2:                           |
+  B.c_yield saved_x  -> I.p_next  ----+
+T.c_done:    <- Producer, I
+  # Seems like Consumer A and B have to running in different threads to proceed
+  # from here!
+  schedule B.c_done
+  A.c_done
+  die
+T.c_config p_next p_done p_config
+  B.c_config p_next
+  set p_next = p_next
+  set p_done = p_done
+  set p_config = p_config
+T.p_done_1:  <- Consumer A
+  I.p_config B.c_yield B.c_done B.c_config
+  -> calls B.c_config I.p_next I.p_done I.p_config
+  die
+T.p_done_2:  <- Consumer B
+  I.p_config A.c_yield A.c_done A.c_config
+  -> calls A.c_config I.p_next I.p_done I.p_config
+  die
+T.p_config_1 c_yield c_done c_config:
+  A.c_yield = c_yield
+  A.c_done = c_done
+  A.c_config = c_config
+T.p_config_2 c_yield c_done c_config:
+  B.c_yield = c_yield
+  B.c_done = c_done
+  B.c_config = c_config
+
+
+
+- Merge
+
+          Producer, A  ------------------>                  
+                           Producer, B  ->  Merge, M     ->  Consumer, C
+p_next      -              -                A/B.p_next       A/B.p_next
+p_done      -              -                A/B.p_done       M.p_done
+p_config    -              -                A/B.p_config     M.p_config
+c_yield     M.c_yield_1    M.c_yield_2      C.c_yield        -
+c_done      M.c_done_1     M.c_done_2       C.c_done         -
+c_config    M.c_config_1   M.c_config_2     C.c_config       -
+
+Startup:
+  - merge init takes two p_configs, returns one
+    - passes init_c_yield_1 to first one
+      - init_c_yield_1 x:
+        - saves x
+        - calls A.p_config M.c_yield_1
+        - goto B.p_next, (which will goto M.c_yield_2)
+    - returned p_config sends A.p_next to Consumer C the first time
+
+M.c_yield_1 x:     <- Producer, A
+  if x <= saved_y:
+    C.c_yield x
+  else:
+    C.c_config B.p_next
+    save x
+    C.c_yield saved_y
+M.c_yield_2 y:     <- Producer, B
+  if y <= saved_x:
+    C.c_yield y
+  else:
+    save y
+    C.c_config A.p_next
+    C.c_yield saved_x
+M.c_done_1:        <- Producer, A
+  B.p_config C.c_yield C.c_done C.c_config
+  -> calls C.c_config B.p_next B.p_done B.p_config
+  die
+M.c_done_2:        <- Producer, B
+  A.p_config C.c_yield C.c_done C.c_config
+  -> calls C.c_config A.p_next A.p_done A.p_config
+  die
+M.c_config_1 p_next p_done p_config:   <- Producer, A
+  A.p_next = p_next
+  A.p_done = p_done
+  A.p_config = p_config
+M.c_config_2 p_next p_done p_config:   <- Producer, B
+  B.p_next = p_next
+  B.p_done = p_done
+  B.p_config = p_config
+M.p_done:
+  A.p_done
+  B.p_done
+  die
+M.p_config c_next c_done c_config:
+  C.c_next = c_next
+  C.c_done = c_done
+  C.c_config = c_config
+  M needs to track which p_next to send to c_config
+
+
+- Skip N
+
+          Producer, P    ->  Skip, S      ->  Consumer, C
+p_next      -                P.p_next         P.p_next
+p_done      -                P.p_done         P.p_done
+p_config    -                P.p_config       S.p_config
+c_yield     S.c_yield        C.c_yield        -
+c_done      S.c_done         C.c_done         -
+c_config    S.c_config       C.c_config       -
+
+Startup:
+  - Skip init takes and returns a p_config
+
+S.c_yield x:       <- Producer, P
+  if count++ < N:
+    GOTO P.p_next
+  P.p_config C.c_yield C.c_done C.c_config
+  -> calls C.c_config P.p_next P.p_done P.p_config
+  die
+S.c_done:          <- Producer, P
+  die
+  C.c_done
+S.c_config p_next p_done p_config:
+  P.p_next = p_next
+  P.p_done = p_done
+  P.p_config = p_config
+  C.c_config p_next p_done
+S.p_config c_yield c_done c_config:
+  C.c_yield = c_yield
+  C.c_done = c_done
+  C.c_config = c_config
+

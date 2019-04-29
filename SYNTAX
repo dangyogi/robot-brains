@@ -1,0 +1,145 @@
+operator precedence (highest to lowest)
+    '.' (left)
+    '^' (right)
+    unary '-' (right)
+    '*' '%' (left)
+    '/' (right)
+    '+' '-' (left)
+    '<' '<=' '<~=' '>' '>=' '>~=' '~=' '!~=' '<~>' (nonassoc)
+    '==' '!=' '<>' (nonassoc)
+    NOT (nonassoc)
+
+
+source_file: opmode | module
+
+
+opmode: (AUTONOMOUS | TELEOP) OPMODE NEWLINES
+        {use}
+
+
+module: MODULE parameters NEWLINES
+        {use}
+        {typedef}
+        {vartype}
+        {fn_decl | sub_decl | labeled_block}
+
+
+use: USE IDENT [AS IDENT] arguments NEWLINES
+
+
+typedef: TYPE IDENT IS type NEWLINES
+
+
+type: FUNCTION [TAKING parameter_types] [RETURNING 1{IDENT}]
+    | SUBROUTINE [TAKING parameter_types]
+    | LABEL [TAKING parameter_types]
+    | IDENT
+    | MODULE
+
+
+parameter_types: pos_parameter_types {kw_parameter_type}
+
+
+pos_parameter_types: {IDENT} ['?' 1{IDENT}]
+
+
+kw_parameter_type: (KEYWORD | OPT_KEYWORD) pos_parameter_types
+
+
+vartype: IDENT IS type NEWLINES
+       | DIM IDENT 1{'[' const_expr ']'} NEWLINES
+
+
+fn_decl: FUNCTION IDENT parameters [RETURNING 1{IDENT}]
+         {typedef}
+         {vartype}
+         {statement}
+
+
+sub_decl: SUBROUTINE IDENT parameters
+          {typedef}
+          {vartype}
+          {statement}
+
+
+parameters: pos_parameters {kw_parameter}
+
+
+pos_parameters: {IDENT} ['?' 1{IDENT}]
+
+
+kw_parameter: (KEYWORD | OPT_KEYWORD) pos_parameters
+
+
+labeled_block: LABEL IDENT parameters NEWLINES
+               {typedef}
+               {vartype}
+               {statement}
+
+
+statement: simple_statement NEWLINES
+         | dlt
+
+
+simple_statement: PASS
+                | CONTINUE
+                | PREPARE primary arguments
+                | REUSE primary [RETURNING_TO: primary]
+                | RELEASE primary
+                | GOTO primary {primary}
+                | SET lvalue TO: primary
+                | RETURN {primary} [FROM: primary] [TO: primary]
+                | primary arguments [RETURNING_TO: primary]
+                | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
+
+
+dlt: '====' NEWLINE
+     1{'|' {'Y'|'N'|'-'} '|' expr NEWLINES}
+     '====' NEWLINE
+     1{action NEWLINES}
+     '====' NEWLINES
+
+
+action : '|' {'X'|' '} '|' [simple_statement]
+       | simple_statement
+
+
+lvalue: IDENT
+      | primary '.' IDENT
+      | primary '[' expr ']'
+
+
+expr: primary
+    | NOT expr
+    | '-' expr
+    | expr '^' expr
+    | expr '*' expr
+    | expr '/' expr
+    | expr '%' expr
+    | expr '+' expr
+    | expr '-' expr
+    | expr '<' expr
+    | expr '<=' expr
+    | expr '<~=' expr
+    | expr '>' expr
+    | expr '>=' expr
+    | expr '>~=' expr
+    | expr '==' expr
+    | expr '~=' expr
+    | expr '!=' expr
+    | expr '<>' expr
+    | expr '!~=' expr
+    | expr '<~>' expr
+
+
+primary: STRING | FLOAT | INTEGER | BOOL | IDENT
+       | '(' expr ')'
+       | primary '.' IDENT
+       | primary '[' expr ']'
+       | GOT? KEYWORD
+       | GOT? IDENT
+       | '{' primary arguments '}'
+
+
+arguments: {primary} {KEYWORD {primary}}
+
