@@ -81,11 +81,7 @@ statement: simple_statement NEWLINES
          | dlt
 
 
-simple_statement: PASS
-                | CONTINUE
-                | PREPARE primary arguments
-                | REUSE primary [RETURNING_TO: primary]
-                | RELEASE primary
+simple_statement: CONTINUE
                 | GOTO primary {primary}
                 | SET lvalue TO: primary
                 | RETURN {primary} [FROM: primary] [TO: primary]

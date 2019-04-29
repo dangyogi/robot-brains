@@ -20,22 +20,23 @@ identifiers:
 reserved words:
     - AS
     - AUTONOMOUS
+    - BOOLEAN
+    - CONTINUE
     - DIM
+    - FLOAT
     - FUNCTION
     - GOTO
+    - INTEGER
     - IS
     - LABEL
     - MODULE
     - NOT
     - OPMODE
-    - PASS
-    - PREPARE
-    - RELEASE
     - RETURN
     - RETURNING
     - RETURNING_TO:
-    - REUSE
     - SET
+    - STRING
     - SUBROUTINE
     - TAKING
     - TELEOP

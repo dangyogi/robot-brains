@@ -318,12 +318,7 @@ def p_const_bool_expr_uminus(p):
 
 def p_simple_statement1(p):
     r"""
-    simple_statement : PASS
-                     | CONTINUE
-                     | PREPARE primary arguments
-                     | REUSE primary
-                     | REUSE primary RETURNING_TO primary
-                     | RELEASE primary
+    simple_statement : CONTINUE
                      | GOTO primary pos_arguments
     """
     p[0] = Statement(p.lineno(1), *p[1:])
