@@ -3,12 +3,67 @@
 module left_motor: left_motor right_motor: right_motor
 
 
+subroutine init
+    left_motor.set_reversed? to: true?
+    return
+
+
 subroutine stop
     left_motor.set_power 0
     right_motor.set_power 0
+    return
+
+
+function get_position ? start
+    =============================================================
+    | YN | got? start
+    =============================================================
+    | X  | continue
+    |  X | set start to: 0
+    =============================================================
+    set position to:
+    -> ((left_motor.position + right_motor.position) / 2 * 66.7 - start)
+    telemetry.report key: "position" value: position
+    return position
 
 
 subroutine move dist
+    set start to: {get_position}
+    =============================================================
+    | YN | dist >= 0
+    =============================================================
+    | X  | goto forward
+    |  X | goto backward
+    =============================================================
+
+
+label forward
+    =============================================================
+    | NYY | isActive?
+    | -YN | {get_position start} < dist
+    =============================================================
+    |  X  | left_motor.set_power 100%
+    |     | right_motor.set_power 100%
+    |     | cycle.next returning_to: forward
+    | X X | left_motor.set_power 0
+    |     | right_motor.set_power 0
+    |     | return
+    =============================================================
+
+
+label backward
+    =============================================================
+    | NYY | isActive?
+    | -YN | {get_position start} > dist
+    =============================================================
+    |  X  | left_motor.set_power -100%
+    |     | right_motor.set_power -100%
+    |     | cycle.next returning_to: backward
+    | X X | left_motor.set_power 0
+    |     | right_motor.set_power 0
+    |     | return
+    =============================================================
 
 
 subroutine turn angle
+    return
