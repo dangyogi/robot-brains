@@ -12,16 +12,16 @@ robot programming).
 
 - Modularity
 
- - Allow the program to be represented as a set of independent bite-sized
-   modules.
+  - Allow the program to be represented as a set of independent bite-sized
+    modules.
    
- - Allow re-use of modules across different programs (FTC "opmodes").
+  - Allow re-use of modules across different programs (FTC "opmodes").
 
- - Support the creation of team libraries that can be re-used from season to
-   season.
+  - Support the creation of team libraries that can be re-used from season to
+    season.
    
-   - This allows teams to capture and reuse what they've learned, so that they
-     can continually improve from one season to the next.
+    - This allows teams to capture and reuse what they've learned, so that they
+      can continually improve from one season to the next.
 
 - Direct support for State Machines.
 
