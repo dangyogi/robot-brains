@@ -59,26 +59,6 @@ class Entity(Symtable):
     def prepare(self, opmode, module):
         pass
 
-    def gen_prep(self, generator):
-        #print(f"{self.name.value}.gen_prep")
-        self.gen_name = self.name.value
-
-    def gen_structs(self, generator):
-        #print(f"{self.name.value}.gen_structs -- ignored")
-        pass
-
-    def gen_struct_entries(self, generator):
-        #print(f"{self.name.value}.gen_struct_entries -- ignored")
-        pass
-
-    def gen_struct_entry(self, generator):
-        #print(f"{self.name.value}.gen_struct_entry -- ignored")
-        pass
-
-    def gen_code(self, generator):
-        print(f"{self.name.value}.gen_structs -- ignored")
-        pass
-
 
 class Variable(Entity):
     explicit_typedef = False
@@ -136,7 +116,7 @@ class Use(Entity):
         self.arguments = arguments
 
     def __repr__(self):
-        return f"<Use {self.name.value} {self.module_name}>"
+        return f"<Use {self.name.value} {self.module_name.value}>"
 
     def prepare(self, opmode, module):
         super().prepare(opmode, module)
@@ -184,10 +164,16 @@ class Builtin_type(Type):
     def __init__(self, name):
         self.name = name  # str
 
+    def __repr__(self):
+        return f"<Builtin_type {self.name}>"
+
 
 class Typename_type(Type):
     def __init__(self, ident):
         self.ident = ident
+
+    def __repr__(self):
+        return f"<Typename {self.ident.value}>"
 
     def prepare(self, opmode, module):
         super().prepare(opmode, module)
@@ -200,8 +186,31 @@ class Typename_type(Type):
 
 
 class Label_type(Type):
-    def __init__(self, type):
-        self.type = type
+    def __init__(self, label_type, taking_blocks, return_types=()):
+        self.label_type = label_type
+        if taking_blocks is None:
+            self.required_params = self.optional_params = ()
+            self.kw_params = ()
+        else:
+            assert len(taking_blocks) == 2
+            assert len(taking_blocks[0]) == 2
+            self.required_params, self.optional_params = taking_blocks[0]
+            self.kw_params = taking_blocks[1]
+        self.return_types = return_types
+
+    def __repr__(self):
+        info = []
+        if self.required_params:
+            info.append(f"required_params: {self.required_params}")
+        if self.optional_params:
+            info.append(f"optional_params: {self.optional_params}")
+        if self.kw_params:
+            info.append(f"kw_params: {self.kw_params}")
+        if self.return_types:
+            info.append(f"returning: {self.return_types}")
+        if info:
+            return f"<Label_type {self.label_type} {' '.join(info)}>"
+        return f"<Label_type {self.label_type}>"
 
 
 class Param_block(Symtable):
@@ -248,6 +257,8 @@ class Param_block(Symtable):
 
 
 class Namespace(Symtable):
+    r'''Collection of named Entities.
+    '''
     def __init__(self, name):
         self.name = name
         self.names = {}
@@ -300,33 +311,6 @@ class Namespace(Symtable):
         for entity in self.names.values():
             entity.dump(f, indent)
 
-    def gen_prep(self, generator):
-        for entity in self.names.values():
-            entity.gen_prep(generator)
-
-    def gen_structs(self, generator):
-        #print("Namespace", self.name, "gen_structs")
-        for entity in self.names.values():
-            entity.gen_structs(generator)
-
-    def gen_struct_entries(self, generator):
-        #print("Namespace", self.name, "gen_struct_entries")
-        for entity in self.names.values():
-            entity.gen_struct_entry(generator)
-
-    def gen_code(self, generator):
-        print("Namespace", self.name, "gen_code")
-        for entity in self.names.values():
-            entity.gen_code(generator)
-
-
-class Dummy_token:
-    def __init__(self, value):
-        self.value = value
-
-    def __repr__(self):
-        return f"<Dummy_token {self.value!r}>"
-
 
 class Opmode(Namespace):
     def __init__(self, modules_seen=None):
@@ -361,13 +345,6 @@ class Opmode(Namespace):
         for obj in self.names.values():
             obj.prepare(opmode, self)
         print(self.name, "number of set bits used", self.next_set_bit)
-
-    def gen_program(self, generator):
-        self.gen_prep(generator)
-        self.gen_structs(generator)
-        generator.start_code()
-        self.gen_code(generator)
-        generator.end_code()
 
 
 class With_parameters(Symtable):
@@ -414,16 +391,16 @@ class Module(Opmode, With_parameters):
         Opmode.__init__(self)
         With_parameters.__init__(self)
 
-    def gen_structs(self, generator):
-        super().gen_structs(generator)
-        self.type_name = generator.emit_struct_start(self.struct_name)
-        self.gen_struct_entries(generator)
-        generator.emit_struct_end()
+    def add_blocks(self, blocks):
+        self.blocks = blocks
+
+    def dump_contents(self, f, indent):
+        super().dump_contents(f, indent)
+        for statement in self.blocks:
+            statement.dump(f, indent)
 
 
-class Labeled_block(Entity, With_parameters):
-    block = None
-
+class Label(Entity, With_parameters):
     def __init__(self, ident):
         Entity.__init__(self, ident)
         With_parameters.__init__(self)
@@ -431,23 +408,9 @@ class Labeled_block(Entity, With_parameters):
     def prepare(self, opmode, module):
         self.assign_passed_bits()
         super().prepare(opmode, module)
-        if self.block is not None:
-            self.block.prepare(opmode, module, self)
-
-    def add_first_block(self, block):
-        self.block = block
-
-    def dump_contents(self, f, indent):
-        super().dump_contents(f, indent)
-        if self.block is not None:
-            self.block.dump(f, indent)
-
-    def gen_code(self, generator):
-        generator.emit_label(self.code_name)
-        self.block.gen_code(generator)
 
 
-class Subroutine(Labeled_block):
+class Subroutine(Label):
     struct_name_suffix = "_sub"
 
 
@@ -465,9 +428,6 @@ class Function(Subroutine):
         super().dump_details(f)
         print(f" return_types {self.return_types}", end='', file=f)
 
-    def gen_ret_entry(self, generator):
-        generator.emit_struct_fn_ret_info()
-
 
 class Block(Symtable):
     def __init__(self, statements):
@@ -481,28 +441,17 @@ class Block(Symtable):
         for s in self.statements:
             s.prepare(opmode, module, label)
 
-    def gen_code(self, f, indent=0):
-        for s in self.statements:
-            s.gen_code(f, indent)
-
 
 class Statement(Symtable):
     arguments = {
-        'pass': (),
-        'prepare': ('expr', (('*', 'expr'), ('*', ('token', ('*', 'expr'))))),
-        'reuse': ('expr', 'ignore', 'expr'),
-        'release': ('expr'),
-        'set': ('lvalue', 'ignore', 'expr'),
-        'goto': ('expr', ('*', 'expr'), 'ignore', 'expr'),
+        'continue': (),
+        'set': ('lvalue', 'expr'),
+        'goto': ('expr', ('*', 'expr')),
         'return': (('*', 'expr'), 'ignore', 'expr'),
     }
 
     formats = {
-        'pass': (),
-        'prepare': ('prepare {}',),
-        'reuse': ('reuse {}',),
-        'release': ('release {}',),
-        'set': ('{0[0]} = {0[2]}',),
+        'set': ('{0[0]} = {0[1]}',),
         'goto': ('goto {}',),
         'return': ('return {}',),
     }
@@ -572,12 +521,12 @@ class Statement(Symtable):
 
 
 class Call_statement(Statement):
-    # primary arguments [RETURNING_TO expr]
+    # primary arguments [RETURNING_TO primary]
     pass
 
 
 class Opeq_statement(Statement):
-    # primary OPEQ expr
+    # primary OPEQ primary
     pass
 
 
@@ -692,47 +641,59 @@ class Conditions(Symtable):
         print(f"{prefix}switch (dlt_mask)", "{", file=f)
 
 
-class Actions(Symtable):
-    r'''
-    self.blocks is [(dlt_map, [column_number], [statement])]
+class DLT_MAP(Symtable):
+    r'''self.map is a Token whose value is the "X X..." map.
     '''
-    def __init__(self, actions):
-        r'actions is ((dlt_map, statement), ...)'
-        self.compile_actions(actions)
+    def __init__(self, map):
+        self.map = map
 
-    def compile_actions(self, actions):
-        r'''Creates self.blocks.
+    def assign_column_numbers(self, seen):
+        r'''Creates self.column_numbers.
 
-        Checks for duplicate markers in the same column.
+        Reports duplicate actions for any column.
         '''
-        if not actions[0][0].value.strip():
-            dlt_map = actions[0][0]
-            scanner.syntax_error("Missing column marker(s) on first DLT action",
-                                 dlt_map.lexpos, dlt_map.lineno)
+        self.column_numbers = []
+        for i, marker in enumerate(self.map.value.lower()):
+            if marker == 'x':
+                if i in seen:
+                    scanner.syntax_error("Duplicate action for column",
+                                         self.map.lexpos + i, self.map.lineno)
+                self.column_numbers.append(i)
 
-        # Gather blocks of actions.
-        # A block starts with an action that has column markers, and includes
-        # all of the following actions without column markers.
-        self.blocks = []  # (dlt_map, [column_number], [statement])
+    def apply_offset(self, offset, num_columns):
+        r'''Subtracts offset from each column_number in self.column_numbers.
+
+        Checks that all column_numbers are >= offset and resulting
+        column_number is < num_columns.
+
+        Returns a list of the resulting column_numbers.
+        '''
+        for i in range(len(self.column_numbers)):
+            if self.column_numbers[i] < offset or \
+               self.column_numbers[i] - offset >= num_columns:
+                scanner.syntax_error("Column marker does not match "
+                                     "any column in DLT conditions section",
+                                     self.map.lexpos + self.column_numbers[i],
+                                     self.map.lineno)
+            self.column_numbers[i] -= offset
+        return self.column_numbers
+
+    def dump_details(self, f):
+        super().dump_details(f)
+        print(f" {self.map.value}", end='', file=f)
+
+    def prepare(self, opmode, module, label):
+        pass
+
+
+class Actions(Symtable):
+    def __init__(self, actions):
+        r'self.actions is ((dlt_map | statement) ...)'
+        self.actions = actions
         seen = set()
-        for dlt_map, statement in actions:
-            markers = dlt_map.value.rstrip()
-            if markers:
-                column_numbers = []
-                for i, marker in enumerate(markers):
-                    if marker in 'xX':
-                        if i in seen:
-                            scanner.syntax_error("Duplicate action for column",
-                                                 dlt_map.lexpos + i,
-                                                 dlt_map.lineno)
-                        column_numbers.append(i)
-                    elif marker != ' ':
-                        scanner.syntax_error("Column marker must be 'X' or ' '",
-                                             dlt_map.lexpos + i, dlt_map.lineno)
-                self.blocks.append((dlt_map, column_numbers,
-                                    ([] if statement is None else [statement])))
-            elif statement is not None:
-                self.blocks[-1][2].append(statement)
+        for action in actions:
+            if isinstance(action, DLT_MAP):
+                action.assign_column_numbers(seen)
 
     def apply_offset(self, offset, num_columns):
         r'''Subtracts offset from each column_number in self.blocks.
@@ -743,24 +704,17 @@ class Actions(Symtable):
         Returns an ordered list of missing column_numbers.
         '''
         seen = set()
-        for dlt_map, column_numbers, _ in self.blocks:
-            for i in range(len(column_numbers)):
-                if column_numbers[i] < offset or \
-                   column_numbers[i] - offset >= num_columns:
-                    scanner.syntax_error("Column marker does not match "
-                                         "any column in DLT conditions section",
-                                         dlt_map.lexpos + column_numbers[i],
-                                         dlt_map.lineno)
-                column_numbers[i] -= offset
-                seen.add(column_numbers[i])
+        for action in self.actions:
+            if isinstance(action, DLT_MAP):
+                seen.update(action.apply_offset(offset, num_columns))
 
         # Return missing column_numbers.
-        return sorted(frozenset(range(num_columns)) - seen)
+        ans = sorted(frozenset(range(num_columns)) - seen)
+        return ans
 
     def prepare(self, opmode, module, label):
-        for _, _, statements in self.blocks:
-            for statement in statements:
-                statement.prepare(opmode, module, label)
+        for action in self.actions:
+            action.prepare(opmode, module, label)
 
     def gen_code(self, f, indent=0):
         prefix = indent_str(indent)
@@ -784,10 +738,6 @@ class DLT(Symtable):
         self.conditions.prepare(opmode, module, label)
         self.actions.prepare(opmode, module, label)
 
-    def gen_code(self, f, indent=0):
-        self.conditions.gen_code(f, indent)
-        self.actions.gen_code(f, indent)
-
 
 class Expr(Symtable):
     def prepare(self, opmode, module, label):
@@ -797,6 +747,14 @@ class Expr(Symtable):
 class Literal(Expr):
     def __init__(self, value):
         self.value = value
+        if isinstance(value, bool):
+            self.type = 'boolean'
+        elif isinstance(value, int):
+            self.type = 'integer'
+        elif isinstance(value, float):
+            self.type = 'float'
+        elif isinstance(value, str):
+            self.type = 'string'
 
     def __repr__(self):
         return f"<Literal {self.value!r}>"
@@ -812,6 +770,7 @@ class Variable_ref(Expr):
     def prepare(self, opmode, module, label):
         super().prepare(opmode, module, label)
         self.referent = lookup(self.ident, module, opmode)
+        self.type = self.referent.type
 
 
 class Dot(Expr):
@@ -825,6 +784,8 @@ class Dot(Expr):
     def prepare(self, opmode, module, label):
         super().prepare(opmode, module, label)
         self.expr.prepare(opmode, module, label)
+        # FIX: self.expr should evaluate to a module at compile time
+        #      then lookup self.ident at compile time
 
 
 class Subscript(Expr):
@@ -844,6 +805,7 @@ class Subscript(Expr):
 class Got_keyword(Expr):
     def __init__(self, keyword):
         self.keyword = keyword
+        self.type = 'boolean'
 
     def __repr__(self):
         return f"<Got_keyword {self.keyword}>"
@@ -865,6 +827,7 @@ class Got_keyword(Expr):
 class Got_param(Expr):
     def __init__(self, ident):
         self.ident = ident
+        self.type = 'boolean'
 
     def __repr__(self):
         return f"<Got_param {self.ident.value}>"

@@ -4,8 +4,8 @@ module
 
 type label_l_t is label taking label_t
 
-tasks is label_t
-what_next is label_t
+var tasks is label_t
+var what_next is label_t
 
 dim tasks[100][2]
 
@@ -31,8 +31,8 @@ subroutine run
 
 
 subroutine run_all name$
-    next_subr is subr_t
-    p_config is p_config_t
+    var next_subr is subr_t
+    var p_config is p_config_t
 
     set i_current to: 0
     set i_next to: 1
@@ -51,8 +51,8 @@ subroutine run_all name$
 subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
     # This only gets called while the producer is still active, so always
     # update what_next.
-    p_next is label_t
-    p_done is subr_t
+    var p_next is label_t
+    var p_done is subr_t
     set what_next to: p_next 
     return
 
@@ -105,7 +105,7 @@ subroutine next
 
 
 subroutine push_task task ?task_list: itask_list
-    task is label_t
+    var task is label_t
     ======================================================================
     | NY | got? task_list:
     ======================================================================
@@ -124,7 +124,7 @@ subroutine push_task task ?task_list: itask_list
 
 subroutine schedule subr
     # Start a new thread
-    subr is subroutine
+    var subr is subroutine
 
     # This will return from this subroutine to let the main thread continue in
     # this cycle

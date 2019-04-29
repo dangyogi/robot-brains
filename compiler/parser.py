@@ -10,9 +10,9 @@ from scanner import (
 
 from symtable import (
     last_parameter_obj, current_namespace, top_namespace, Module, Opmode,
-    Subroutine, Function, Use, Typedef, Labeled_block, Block,
-    DLT, Conditions, Actions, Variable, Required_parameter, Optional_parameter,
-    Statement, Call_statement, Opeq_statement,
+    Subroutine, Function, Use, Typedef, Label, Block,
+    DLT, Conditions, DLT_MAP, Actions, Variable, Required_parameter,
+    Optional_parameter, Statement, Call_statement, Opeq_statement,
     Literal, Variable_ref, Dot, Subscript, Got_keyword, Got_param, Call_fn,
     Unary_expr, Binary_expr, Builtin_type, Typename_type, Label_type,
 )
@@ -45,7 +45,9 @@ def p_empty_tuple(p):
     parameter_types_list :
     primarys :
     returning_opt :
-    taking_opt :
+    blocks :
+    statements :
+    action_statements :
     '''
     p[0] = ()
 
@@ -59,6 +61,7 @@ def p_first(p):
     expr : primary
     statement : simple_statement newlines
               | dlt
+    actions : action
     parameter_types_list : parameter_types_list1
     opmode_type : AUTONOMOUS
                 | TELEOP
@@ -72,6 +75,9 @@ def p_second(p):
     const_expr : '(' const_expr ')'
     returning_opt : RETURNING idents
     taking_opt : TAKING parameter_types
+    label_decl : FUNCTION fn_name parameters set_returning_opt newlines
+               | SUBROUTINE sub_name parameters newlines
+               | LABEL label_name parameters newlines
     '''
     p[0] = p[2]
 
@@ -83,16 +89,10 @@ def p_none(p):
     newlines : NEWLINE
     newlines : newlines NEWLINE
     opmode : opmode_type OPMODE make_opmode newlines uses
-    module : MODULE make_module parameters newlines \
-             uses typedefs vartypes decls
     typedefs :
              | typedefs typedef
     vartypes :
              | vartypes vartype
-    decls :
-          | decls fn_decl
-          | decls sub_decl
-          | decls labeled_block
     parameters : pos_parameters kw_parameters
     pos_parameters : required_parameters
     pos_parameters : required_parameters '?' optional_parameters
@@ -104,13 +104,7 @@ def p_none(p):
                   | kw_parameters keyword pos_parameters
     uses :
          | uses use
-    fn_decl : FUNCTION fn_name parameters set_returning_opt newlines \
-              typedefs vartypes first_block
-    sub_decl : SUBROUTINE sub_name parameters newlines \
-               typedefs vartypes first_block
-    first_block :
-    labeled_block : LABEL labeled_block_name parameters newlines \
-                    typedefs vartypes first_block
+    taking_opt :
     from_opt :
     '''
     p[0] = None
@@ -119,9 +113,7 @@ def p_none(p):
 def p_1tuple(p):
     '''
     conditions : condition
-    actions : action
     parameter_types_list1 : IDENT
-    statements1 : statement
     idents : IDENT
     dimensions : dimension
     '''
@@ -131,17 +123,36 @@ def p_1tuple(p):
 def p_append(p):
     '''
     kw_arguments : kw_arguments kw_argument
-    statements1 : statements1 statement
+    statements : statements statement
     conditions : conditions condition
-    actions : actions action
     idents : idents IDENT
     pos_arguments : pos_arguments primary
     kw_parameter_types : kw_parameter_types kw_parameter_type
     parameter_types_list1 : parameter_types_list1 IDENT
     primarys : primarys primary
     dimensions : dimensions dimension
+    action_statements : action_statements simple_statement newlines
     '''
     p[0] = p[1] + (p[2],)
+
+
+def p_actions(p):
+    'actions : actions action'
+    p[0] = p[1] + p[2]
+
+
+def p_block(p):
+    '''
+    block : label_decl typedefs vartypes statements
+    '''
+    p[0] = (p[1],) + p[4]
+
+
+def p_paste(p):
+    '''
+    blocks : blocks block
+    '''
+    p[0] = p[1] + p[2]
 
 
 def p_all(p):
@@ -158,13 +169,27 @@ def p_all(p):
     p[0] = tuple(p[1:])
 
 
-def p_label_type(p):
+def p_module(p):
+    '''
+    module : MODULE make_module parameters newlines \
+             uses typedefs vartypes blocks
+    '''
+    current_namespace().add_blocks(p[8])
+
+
+def p_label_type1(p):
     """
-    type : FUNCTION taking_opt returning_opt
-         | SUBROUTINE taking_opt
+    type : SUBROUTINE taking_opt
          | LABEL taking_opt
     """
-    p[0] = Label_type(p[1:])
+    p[0] = Label_type(p[1], p[2])
+
+
+def p_label_type2(p):
+    """
+    type : FUNCTION taking_opt returning_opt
+    """
+    p[0] = Label_type(p[1], p[2], p[3])
 
 
 def p_builtin_type(p):
@@ -372,11 +397,6 @@ def p_file(p):
     p[0] = top_namespace()
 
 
-def p_block(p):
-    'block : statements1'
-    p[0] = Block(p[1])
-
-
 def p_primary(p):
     '''
     primary : '{' primary arguments '}'
@@ -459,13 +479,13 @@ def p_set_returning_opt(p):
 
 def p_vartype(p):
     '''
-    vartype : IDENT IS type newlines
+    vartype : VAR IDENT IS type newlines
     '''
-    var = current_namespace().make_variable(p[1])
+    var = current_namespace().make_variable(p[2])
     if var.explicit_typedef:
         syntax_error("Duplicate variable type declaration",
-                     p[1].lexpos, p[1].lineno)
-    var.type = p[3]
+                     p[2].lexpos, p[2].lineno)
+    var.type = p[4]
     var.explicit_typedef = True
 
 
@@ -487,22 +507,17 @@ def p_dim(p):
 
 def p_fn_name(p):
     'fn_name : IDENT'
-    Function(p[1])
+    p[0] = Function(p[1])
 
 
 def p_sub_name(p):
     'sub_name : IDENT'
-    Subroutine(p[1])
+    p[0] = Subroutine(p[1])
 
 
-def p_first_block(p):
-    'first_block : block'
-    last_parameter_obj().add_first_block(p[1])
-
-
-def p_labeled_block_name(p):
-    'labeled_block_name : IDENT'
-    Labeled_block(p[1])
+def p_label_name(p):
+    'label_name : IDENT'
+    p[0] = Label(p[1])
 
 
 def p_dlt(p):
@@ -525,23 +540,16 @@ def p_condition(p):
 
 def p_action1(p):
     '''
-    action : simple_statement newlines
+    action : DLT_MAP action_statements
     '''
-    p[0] = Token(None, value='', lexpos=p.lexpos(1), lineno=p.lineno(1)), p[1]
+    p[0] = (DLT_MAP(p[1]),) + p[2]
 
 
 def p_action2(p):
     '''
-    action : DLT_MAP simple_statement newlines
+    action : DLT_MAP newlines action_statements
     '''
-    p[0] = p[1], p[2]
-
-
-def p_action3(p):
-    '''
-    action : DLT_MAP newlines
-    '''
-    p[0] = p[1], None
+    p[0] = (DLT_MAP(p[1]),) + p[3]
 
 
 def p_dlt_conditions(p):

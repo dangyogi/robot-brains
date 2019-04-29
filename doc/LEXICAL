@@ -42,6 +42,7 @@ reserved words:
     - TELEOP
     - TYPE
     - USE
+    - VAR
 
 literals:
     - strings:

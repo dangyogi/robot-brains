@@ -21,7 +21,7 @@ module: MODULE parameters NEWLINES
         {use}
         {typedef}
         {vartype}
-        {fn_decl | sub_decl | labeled_block}
+        {block}
 
 
 use: USE IDENT [AS IDENT] arguments NEWLINES
@@ -46,20 +46,19 @@ pos_parameter_types: {IDENT} ['?' 1{IDENT}]
 kw_parameter_type: (KEYWORD | OPT_KEYWORD) pos_parameter_types
 
 
-vartype: IDENT IS type NEWLINES
+vartype: VAR IDENT IS type NEWLINES
        | DIM IDENT 1{'[' const_expr ']'} NEWLINES
 
 
-fn_decl: FUNCTION IDENT parameters [RETURNING 1{IDENT}]
-         {typedef}
-         {vartype}
-         {statement}
-
-
-sub_decl: SUBROUTINE IDENT parameters
+block : label_decl
           {typedef}
           {vartype}
           {statement}
+
+
+label_decl: FUNCTION IDENT parameters [RETURNING 1{IDENT}] NEWLINES
+          | SUBROUTINE IDENT parameters NEWLINES
+          | LABEL IDENT parameters NEWLINES
 
 
 parameters: pos_parameters {kw_parameter}
@@ -70,11 +69,6 @@ pos_parameters: {IDENT} ['?' 1{IDENT}]
 
 kw_parameter: (KEYWORD | OPT_KEYWORD) pos_parameters
 
-
-labeled_block: LABEL IDENT parameters NEWLINES
-               {typedef}
-               {vartype}
-               {statement}
 
 
 statement: simple_statement NEWLINES
@@ -92,12 +86,11 @@ simple_statement: CONTINUE
 dlt: '====' NEWLINE
      1{'|' {'Y'|'N'|'-'} '|' expr NEWLINES}
      '====' NEWLINE
-     1{action NEWLINES}
+     1{action}
      '====' NEWLINES
 
 
-action : '|' {'X'|' '} '|' [simple_statement]
-       | simple_statement
+action : '|' {'X'|' '} '|' [NEWLINES] {simple_statement NEWLINES}
 
 
 lvalue: IDENT

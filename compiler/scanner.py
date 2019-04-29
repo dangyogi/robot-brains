@@ -66,6 +66,7 @@ reserved = frozenset((
     'TELEOP',
     'TYPE',
     'USE',
+    'VAR',
 ))
 
 tokens = (
@@ -323,7 +324,8 @@ def t_DLT_MASK(t):
 def t_DLT_MAP(t):
     r'\|\ *[xX][ xX]*\|'
     t.value = Token(t, t.value[1:-1].rstrip(), lexpos=t.lexpos + 1)
-    return t
+    if t.value:
+        return t
 
 
 def t_EQ(t):
