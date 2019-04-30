@@ -200,7 +200,7 @@ def p_builtin_type(p):
          | STRING
          | MODULE
     """
-    p[0] = Builtin_type(p[1].value)
+    p[0] = Builtin_type(p[1].lower())
 
 
 def p_typename(p):

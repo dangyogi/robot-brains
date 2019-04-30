@@ -1,50 +1,72 @@
 Descriptors:
 
-- label_descriptor has:       // init outside of main (except for start_label)
-  - char *name
-  - char type                   // 'S' or 'F'
-  - int num_param_blocks
-  - param_block_descriptors *param_block_decriptors
-  - int flags_offset            // from start of module instance
-  - int ret_pointer_offset      // from start of module instance
-  - void *start_label;          // set in label init
+- label_descriptor
+  - one per label for each module instance
+  - init outside of main (except for start_label)
+  - has:
+    - char *name
+    - char type                   // 'S', 'F' or 'L'
+    - int num_param_blocks
+    - module instance *module
+    * param_block_descriptors *param_block_decriptors
+    * unsigned long flags
+      - has param_passed and kw_passed bits
+      - has running bit for subroutines and functions
+    * label_descriptor *ret_pointer
+      - for subroutines and functions
+    * void *start_label;          // set in label init
 
-- param_block_descriptor has:   // init outside of main
-  - char *name;                 // "__pos__" for pos_params
-  - int num_params;             // required and optional
-  - int num_required_params;
-  - int num_optional_params;
-  - int *param_offsets;         // indexed by num args passed
-                                // initialized as (int []){...}
-  - unsigned long kw_mask;      // 0 if required keyword
-  - unsigned long *param_masks; // indexed by optional param number
-                                // initialized as (unsigned long []){...}
+- param_block_descriptor
+  - one per param_block per label for each module instance
+  - init outside of main
+  - has:
+    - char *name;                 // "__pos__" for pos_params
+    - int num_params;             // required and optional
+    - int num_required_params;
+    - int num_optional_params;
+    * void *param_location[];     // indexed by num args passed
+                                  // initialized as {&x, &y, ...}
+    - unsigned long kw_mask;      // 1 bit set; 0 if required keyword
+    - unsigned long *param_masks; // indexed by optional param number
+                                  // initialized as (unsigned long []){...}
 
-- module_descriptor has:        // init outside of main
-  - char *name
-  - char *filename
-  - int num_labels
-  - label_descriptor *labels[]  // initialized as {&label_desc, ...}
+- module_descriptor
+  - one for each module instance
+  - init outside of main
+  - has:
+    * char *name                  // full path, e.g., "a.b.c"
+    - char *filename
+    - unsigned long flags
+      - has var-set flags
+        - init to 0 outside of main
+    - unsigned long lineno
+    - int num_labels
+    * label_descriptor *labels[]  // initialized as {&label_desc, ...}
 
 
 Instances:
 
-- label, sub_ret, fn_ret, sub and fn pointers have:
-  - struct module_instance_s *module   // also serves as param_context
-  - label_descriptor *descriptor
+- label, sub_ret, fn_ret, sub and fn pointers
+  - are just:
+    - label_descriptor *descriptor
 
-- struct module_instance_s has:    // shared by all module instances
-  - module_descriptor *descriptor  // init outside of main
-  - unsigned long flags            // initialized to 0 outside of main
-  - unsigned long lineno
+- struct module_instance_s
+  - same type for each module instance
+  - is just:
+    - module_descriptor *descriptor  // init in main
 
-- module instance has:
-  - module_instance_s
-  - "use" module instances              // init outside of main
-  - module parameters
-  - variables
-  - label temps
-  - label dlt_masks
+- module instance
+  - one for each module instance
+  - has:
+    - module_instance_s
+    - "use" module instances            // init outside of main
+    - module parameters
+      - init in main
+    - variables
+    - label flags
+    - label ret_pointers
+    - label temps
+    - label dlt_masks
 
 
 - opmode_instance opmode                // global variable
@@ -56,27 +78,24 @@ SOURCE FILE LAYOUT:
 - built-in types
 - all module instance struct definitions
   - used module instance structs before using module instance structs
+- top-level opmode instance declaration
+- builtins instance declaration
 - all descriptors
   - label_descriptors before their module_descriptors
-- top-level opmode instance declaration
-- builtins declaration
 - int num_modules constant
 - module instance * list (bottom-up "uses" order)
 
 - "main"
-  - struct module_instance_s *current_module;
-  - init descriptors
-  - call builtin_init
-  - call top-level opmode_init
+  - init start_labels in all label_descriptors
+  - set module descriptor pointer in all module instances
+  - initialize module parameters/variables in all module instances
+    - call exprs in use arguments
+    - initialize module flags
+      - vars set
+      - params passed, kw_passed
   - call cycle.run
   - return 0
-  - init code for each module (not instance)
-    - initialize module parameters/variables
-    - initialize module flags
-    - call module inits for used modules
-    - init all contained labels
-  - code for each module (not instance)
-    - code for each routine in that module (not instance)
+  - code for each module instance
   - built-in code
     - get_num_modules
     - get_num_labels module_index
@@ -90,29 +109,23 @@ EXECUTABLE CODE:
   - uses jump labels and gcc &&label within the routines.
 
 - goto (passes params, no return, might be to pointer)
-  - check running set in label_flags
   - pointer is label_pointer, otherwise info known at compile time
   - steps:
     - store parameters
-    - set passed bits
-    - restore current_module              // can be skipped if known label in
-                                          // same module
+    - set passed bits in label.flags
     - goto *start_label
 
 - return
-  - check my running flag
+  - check my running flag in label.flags
   - set params through *param_block
-  - reset my running flag
-  - restore current_module
+  - reset my running flag in label.flags
   - goto *start_label
 
 - call
-  - check not remote prepared
-  - check and set remote running flag
+  - check and set remote running flag in label.flags
   - for each param_block:
-    - set params to remote param_block
-    - set passed bits
+    - set params in remote param_block
+    - set passed bits in label.flags
   - call routine
-    - store current_module in remote ret_pointer.module
-    - store label_descriptor for ret_label in remote ret_pointer.descriptor
+    - store label_descriptor for ret_label in remote label.ret_pointer
     - goto *start_label
