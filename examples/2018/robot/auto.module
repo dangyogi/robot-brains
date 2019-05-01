@@ -22,8 +22,10 @@ subroutine start
     drive.move -20in
     drive.turn 20deg
     drive.move -50in
+    return
 
 
 subroutine stop
     spinner_motor.set_power 0
     drive_train.skid_drive.stop
+    return

@@ -5,6 +5,7 @@ __pycache__/
 
 # vim editor
 .*.swp
+.*.swo
 
 # python saved history file
 .pyhist

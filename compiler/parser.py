@@ -10,7 +10,7 @@ from scanner import (
 
 from symtable import (
     last_parameter_obj, current_namespace, top_namespace, Module, Opmode,
-    Subroutine, Function, Use, Typedef, Label, Block,
+    Subroutine, Function, Use, Typedef, Label,
     DLT, Conditions, DLT_MAP, Actions, Variable, Required_parameter,
     Optional_parameter, Statement, Call_statement, Opeq_statement,
     Literal, Variable_ref, Dot, Subscript, Got_keyword, Got_param, Call_fn,
@@ -41,11 +41,10 @@ def p_empty_tuple(p):
     '''
     pos_arguments :
     kw_arguments :
-    kw_parameter_types :
     parameter_types_list :
     primarys :
     returning_opt :
-    blocks :
+    steps :
     statements :
     action_statements :
     '''
@@ -59,6 +58,8 @@ def p_first(p):
                | INTEGER_LIT
                | BOOLEAN_LIT
     expr : primary
+    primary : simple_primary
+    type : simple_type
     statement : simple_statement newlines
               | dlt
     actions : action
@@ -71,9 +72,10 @@ def p_first(p):
 
 def p_second(p):
     '''
-    primary : '(' expr ')'
+    simple_primary : '(' expr ')'
+    simple_type : '(' type ')'
     const_expr : '(' const_expr ')'
-    returning_opt : RETURNING idents
+    returning_opt : RETURNING simple_types
     taking_opt : TAKING parameter_types
     label_decl : FUNCTION fn_name parameters set_returning_opt newlines
                | SUBROUTINE sub_name parameters newlines
@@ -88,7 +90,7 @@ def p_none(p):
     newlines_opt : newlines_opt NEWLINE
     newlines : NEWLINE
     newlines : newlines NEWLINE
-    opmode : opmode_type OPMODE make_opmode newlines uses
+    opmode : opmode_type OPMODE make_opmode newlines uses typedefs
     typedefs :
              | typedefs typedef
     vartypes :
@@ -113,8 +115,9 @@ def p_none(p):
 def p_1tuple(p):
     '''
     conditions : condition
-    parameter_types_list1 : IDENT
-    idents : IDENT
+    parameter_types_list1 : simple_type
+    kw_parameter_types : kw_parameter_type
+    simple_types : simple_type
     dimensions : dimension
     '''
     p[0] = (p[1],)
@@ -125,10 +128,10 @@ def p_append(p):
     kw_arguments : kw_arguments kw_argument
     statements : statements statement
     conditions : conditions condition
-    idents : idents IDENT
+    simple_types : simple_types simple_type
     pos_arguments : pos_arguments primary
     kw_parameter_types : kw_parameter_types kw_parameter_type
-    parameter_types_list1 : parameter_types_list1 IDENT
+    parameter_types_list1 : parameter_types_list1 simple_type
     primarys : primarys primary
     dimensions : dimensions dimension
     action_statements : action_statements simple_statement newlines
@@ -141,16 +144,16 @@ def p_actions(p):
     p[0] = p[1] + p[2]
 
 
-def p_block(p):
+def p_step(p):
     '''
-    block : label_decl typedefs vartypes statements
+    step : label_decl typedefs vartypes statements
     '''
     p[0] = (p[1],) + p[4]
 
 
 def p_paste(p):
     '''
-    blocks : blocks block
+    steps : steps step
     '''
     p[0] = p[1] + p[2]
 
@@ -159,8 +162,8 @@ def p_all(p):
     """
     arguments : pos_arguments kw_arguments
     kw_argument : KEYWORD pos_arguments
-    lvalue : primary '.' IDENT
-    lvalue : primary '[' expr ']'
+    lvalue : simple_primary '.' IDENT
+    lvalue : simple_primary '[' expr ']'
     parameter_types : pos_parameter_types kw_parameter_types
     kw_parameter_type : KEYWORD pos_parameter_types
     kw_parameter_type : OPT_KEYWORD pos_parameter_types
@@ -172,9 +175,9 @@ def p_all(p):
 def p_module(p):
     '''
     module : MODULE make_module parameters newlines \
-             uses typedefs vartypes blocks
+             uses typedefs vartypes steps
     '''
-    current_namespace().add_blocks(p[8])
+    current_namespace().add_steps(p[8])
 
 
 def p_label_type1(p):
@@ -194,17 +197,17 @@ def p_label_type2(p):
 
 def p_builtin_type(p):
     """
-    type : INTEGER
-         | FLOAT
-         | BOOLEAN
-         | STRING
-         | MODULE
+    simple_type : INTEGER
+                | FLOAT
+                | BOOLEAN
+                | STRING
+                | MODULE
     """
     p[0] = Builtin_type(p[1].lower())
 
 
 def p_typename(p):
-    "type : IDENT"
+    "simple_type : IDENT"
     p[0] = Typename_type(p[1])
 
 
@@ -228,28 +231,48 @@ def p_primary_literal(p):
 
 
 def p_primary_ident(p):
-    "primary : IDENT"
+    "simple_primary : IDENT"
     p[0] = Variable_ref(p[1])
 
 
 def p_primary_dot(p):
-    "primary : primary '.' IDENT"
+    "simple_primary : simple_primary '.' IDENT"
     p[0] = Dot(p[1], p[3])
 
 
 def p_primary_subscript(p):
-    "primary : primary '[' expr ']'"
+    "simple_primary : simple_primary '[' expr ']'"
     p[0] = Subscript(p[1], p[3])
 
 
-def p_primary_got_keyword(p):
+def p_primary_got_keyword1(p):
     "primary : GOT KEYWORD"
     p[0] = Got_keyword(p[2])
 
 
-def p_primary_got_param(p):
+def p_primary_got_keyword2(p):
+    "primary : GOT IDENT '.' KEYWORD"
+    p[0] = Got_keyword(p[4], p[2])
+
+
+def p_primary_got_keyword3(p):
+    "primary : GOT MODULE '.' KEYWORD"
+    p[0] = Got_keyword(p[4], module=True)
+
+
+def p_primary_got_param1(p):
     "primary : GOT IDENT"
     p[0] = Got_param(p[2])
+
+
+def p_primary_got_param2(p):
+    "primary : GOT IDENT '.' IDENT"
+    p[0] = Got_param(p[4], p[2])
+
+
+def p_primary_got_param3(p):
+    "primary : GOT MODULE '.' IDENT"
+    p[0] = Got_param(p[4], module=True)
 
 
 def p_unary_expr(p):
@@ -283,12 +306,17 @@ def p_binary_expr(p):
 
 
 def p_pos_parameter_types1(p):
-    'pos_parameter_types : parameter_types_list'
+    '''
+    parameter_types : pos_parameter_types1
+    pos_parameter_types1 : parameter_types_list1
+    pos_parameter_types : parameter_types_list
+    '''
     p[0] = p[1], ()
 
 
 def p_pos_parameter_types2(p):
     '''
+    pos_parameter_types1 : parameter_types_list '?' parameter_types_list1
     pos_parameter_types : parameter_types_list '?' parameter_types_list1
     '''
     p[0] = p[1], p[3]
@@ -399,7 +427,7 @@ def p_file(p):
 
 def p_primary(p):
     '''
-    primary : '{' primary arguments '}'
+    simple_primary : '{' primary arguments '}'
     '''
     p[0] = Call_fn(p[2], p[3])
 
@@ -638,14 +666,18 @@ if __name__ == "__main__":
     top_entity = parse_opmode(filename, # debug=True,
                              )
     print("top_entity is", top_entity)
-    print()
-    print("dump:")
-    print()
-    top_entity.dump(sys.stdout)
+    if False:
+        print()
+        print("dump:")
+        print()
+        top_entity.dump(sys.stdout)
 
     print()
     print("code:")
     print()
     import C_gen
-    C_gen.gen_program(top_entity)
+    try:
+        C_gen.gen_program(top_entity)
+    except SyntaxError:
+        sys.exit(1)
 

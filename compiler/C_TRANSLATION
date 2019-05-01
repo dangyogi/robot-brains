@@ -5,43 +5,47 @@ Descriptors:
   - init outside of main (except for start_label)
   - has:
     - char *name
-    - char type                   // 'S', 'F' or 'L'
+    - char type                     // 'S', 'F' or 'L'
     - int num_param_blocks
     - module instance *module
     * param_block_descriptors *param_block_decriptors
-    * unsigned long flags
+    * unsigned long params_passed   // one bit per var
       - has param_passed and kw_passed bits
-      - has running bit for subroutines and functions
-    * label_descriptor *ret_pointer
+      - has one running bit for subroutines and functions
+    * label_descriptor *return_label
       - for subroutines and functions
-    * void *start_label;          // set in label init
+    * void *start_label;            // set in label init
 
 - param_block_descriptor
   - one per param_block per label for each module instance
   - init outside of main
   - has:
-    - char *name;                 // "__pos__" for pos_params
-    - int num_params;             // required and optional
+    - char *name;                   // "__pos__" for pos_params
+    - int num_params;               // required and optional
     - int num_required_params;
     - int num_optional_params;
-    * void *param_location[];     // indexed by num args passed
-                                  // initialized as {&x, &y, ...}
-    - unsigned long kw_mask;      // 1 bit set; 0 if required keyword
-    - unsigned long *param_masks; // indexed by optional param number
-                                  // initialized as (unsigned long []){...}
+    - void *param_location[];       // all params, indexed by param number
+                                    // initialized as {&x, &y, ...}
+    - unsigned long *var_set_masks; // all params, indexed by param number
+                                    // applied to module.flags
+                                    // initialized as (unsigned long []){...}
+    - unsigned long kw_mask;        // 1 bit set; 0 if required keyword
+                                    // applied to label.flags
+    - unsigned long *param_masks;   // indexed by _optional_ param number
+                                    // applied to label.flags
+                                    // initialized as (unsigned long []){...}
 
 - module_descriptor
   - one for each module instance
   - init outside of main
   - has:
-    * char *name                  // full path, e.g., "a.b.c"
+    - char *name                    // full path, e.g., "a.b.c"
     - char *filename
-    - unsigned long flags
-      - has var-set flags
-        - init to 0 outside of main
+    - unsigned long vars_set        // one bit per var
+      - init to 0 outside of main
     - unsigned long lineno
     - int num_labels
-    * label_descriptor *labels[]  // initialized as {&label_desc, ...}
+    - label_descriptor *labels[]    // initialized as {&label_desc, ...}
 
 
 Instances:
@@ -58,24 +62,21 @@ Instances:
 - module instance
   - one for each module instance
   - has:
-    - module_instance_s
-    - "use" module instances            // init outside of main
-    - module parameters
-      - init in main
+    - module_descriptor
+    - "use" module instances         // init outside of main
     - variables
-    - label flags
-    - label ret_pointers
+      - module parameters init in main
     - label temps
     - label dlt_masks
 
 
-- opmode_instance opmode                // global variable
-- builtin_instance builtins             // global variable
+- opmode_instance opmode             // global variable
+- builtin_instance builtins          // global variable
 
 
 SOURCE FILE LAYOUT:
 
-- built-in types
+- built-in types and C helper functions (from C_preamble file)
 - all module instance struct definitions
   - used module instance structs before using module instance structs
 - top-level opmode instance declaration
@@ -90,8 +91,9 @@ SOURCE FILE LAYOUT:
   - set module descriptor pointer in all module instances
   - initialize module parameters/variables in all module instances
     - call exprs in use arguments
-    - initialize module flags
+    - initialize module vars_set
       - vars set
+    - initialize label params_passed
       - params passed, kw_passed
   - call cycle.run
   - return 0
@@ -111,21 +113,29 @@ EXECUTABLE CODE:
 - goto (passes params, no return, might be to pointer)
   - pointer is label_pointer, otherwise info known at compile time
   - steps:
+    - reset all passed bits in label.params_passed
     - store parameters
-    - set passed bits in label.flags
+    - set passed bits in label.params_passed
+    - set var_set bits in module.vars_set
     - goto *start_label
 
 - return
-  - check my running flag in label.flags
+  - check my running flag in label.params_passed
+  - reset all passed bits in label.params_passed
   - set params through *param_block
-  - reset my running flag in label.flags
+    - set passed bits in label.params_passed
+    - set var_set bits in module.vars_set
+  - reset my running flag in label.params_passed
   - goto *start_label
 
 - call
-  - check and set remote running flag in label.flags
+  - check and set remote running flag in label.params_passed
   - for each param_block:
+    - reset all passed bits in label.params_passed
     - set params in remote param_block
-    - set passed bits in label.flags
+    - set passed bits in label.params_passed
+    - set var_set bits in module.vars_set
   - call routine
-    - store label_descriptor for ret_label in remote label.ret_pointer
+    - store label_descriptor for return label in remote label.return_label
     - goto *start_label
+

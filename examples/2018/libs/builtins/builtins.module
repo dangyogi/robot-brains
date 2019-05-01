@@ -17,6 +17,10 @@ type c_config_t is subroutine taking ?p_next: label_t ?p_done: subr_t
 
 type subr_t is subroutine
 
+# FIX: temporary
+var isAlive? is boolean
+var isStarted? is boolean
+
 
 function get_subroutines_by_name name$ returning p_config_t
   goto ret_pointer p_config

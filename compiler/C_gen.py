@@ -10,6 +10,7 @@ from scanner import Token, syntax_error
 
 
 C_UNSIGNED_LONG_BITS = 64
+Num_label_bits = 1              # running bit
 Max_bits_used = 0
 
 
@@ -166,18 +167,18 @@ def gen_program(opmode):
         #           program.
         # These are in bottom-up order based on "uses".
         modules = list(tsort_modules(opmode))
-        #print("modules", modules)
+        print("modules", modules)
 
-        def do(fn):
+        def do(fn, top_down=False):
             ans = []
-            for m in modules:
+            for m in (reversed(modules) if top_down else modules):
                 result = fn(m)
                 if result:
                     ans.extend(result)
             return ans
 
         print("prepare ....")
-        do(operator.methodcaller('prepare', opmode))
+        do(lambda m: m.prepare(opmode, m), top_down=True)
         print("assign_names ....")
         do(assign_names)
         print("Max_bits_used", Max_bits_used, Max_bits_obj)

@@ -15,13 +15,14 @@ source_file: opmode | module
 
 opmode: (AUTONOMOUS | TELEOP) OPMODE NEWLINES
         {use}
+        {typedef}
 
 
 module: MODULE parameters NEWLINES
         {use}
         {typedef}
         {vartype}
-        {block}
+        {step}
 
 
 use: USE IDENT [AS IDENT] arguments NEWLINES
@@ -30,17 +31,22 @@ use: USE IDENT [AS IDENT] arguments NEWLINES
 typedef: TYPE IDENT IS type NEWLINES
 
 
-type: FUNCTION [TAKING parameter_types] [RETURNING 1{IDENT}]
+type: FUNCTION [TAKING parameter_types] [RETURNING 1{simple_type}]
     | SUBROUTINE [TAKING parameter_types]
     | LABEL [TAKING parameter_types]
     | IDENT
     | MODULE
 
 
-parameter_types: pos_parameter_types {kw_parameter_type}
+parameter_types: pos_parameter_types1
+               | pos_parameter_types 1{kw_parameter_type}
 
 
-pos_parameter_types: {IDENT} ['?' 1{IDENT}]
+pos_parameter_types1: 1{simple_type}
+                    | {simple_type} '?' 1{simple_type}
+
+
+pos_parameter_types: {simple_type} ['?' 1{simple_type}]
 
 
 kw_parameter_type: (KEYWORD | OPT_KEYWORD) pos_parameter_types
@@ -50,13 +56,13 @@ vartype: VAR IDENT IS type NEWLINES
        | DIM IDENT 1{'[' const_expr ']'} NEWLINES
 
 
-block : label_decl
-          {typedef}
-          {vartype}
-          {statement}
+step : label_decl
+         {typedef}
+         {vartype}
+         {statement}
 
 
-label_decl: FUNCTION IDENT parameters [RETURNING 1{IDENT}] NEWLINES
+label_decl: FUNCTION IDENT parameters [RETURNING 1{simple_type}] NEWLINES
           | SUBROUTINE IDENT parameters NEWLINES
           | LABEL IDENT parameters NEWLINES
 
@@ -125,8 +131,8 @@ primary: STRING | FLOAT | INTEGER | BOOL | IDENT
        | '(' expr ')'
        | primary '.' IDENT
        | primary '[' expr ']'
-       | GOT? KEYWORD
-       | GOT? IDENT
+       | GOT? [(MODULE | IDENT) '.'] KEYWORD
+       | GOT? [(MODULE | IDENT) '.'] IDENT
        | '{' primary arguments '}'
 
 

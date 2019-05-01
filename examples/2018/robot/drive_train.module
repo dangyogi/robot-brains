@@ -7,3 +7,4 @@ use skid_drive left_motor: left_motor right_motor: right_motor
 
 subroutine init
     set left_motor.reversed? to: true?
+    return
