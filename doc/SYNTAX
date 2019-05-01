@@ -61,9 +61,9 @@ step : label_decl
          {vartype}
          {statement}
      | NATIVE FUNCTION IDENT {IDENT} [RETURNING 1{simple_type}] NEWLINES
-         native_body NEWLINES
+         1{native_line}
      | NATIVE SUBROUTINE IDENT {IDENT} NEWLINES
-         native_body NEWLINES
+         1{native_line}
 
 
 label_decl : FUNCTION IDENT parameters [RETURNING 1{simple_type}] NEWLINES
@@ -104,8 +104,7 @@ dlt : '====' NEWLINE
 action : '|' {'X'|' '} '|' [NEWLINES] {simple_statement NEWLINES}
 
 
-native_body : (primary | NATIVE_STRING_LIT)
-            | native_body [NEWLINE] (primary | NATIVE_STRING_LIT)
+native_line : 1{primary | NATIVE_STRING_LIT} NEWLINES
 
 
 lvalue : IDENT

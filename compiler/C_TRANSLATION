@@ -83,8 +83,8 @@ SOURCE FILE LAYOUT:
 - builtins instance declaration
 - all descriptors
   - label_descriptors before their module_descriptors
-- int num_modules constant
-- module instance * list (bottom-up "uses" order)
+- int __num_modules__ constant
+- module instance * __module_instances__ (bottom-up "uses" order)
 
 - "main"
   - init start_labels in all label_descriptors

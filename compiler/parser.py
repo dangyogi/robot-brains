@@ -56,6 +56,7 @@ def p_first(p):
     '''
     native_element : primary
                    | NATIVE_STRING_LIT
+    native_line : native_elements newlines
     const_expr : STRING_LIT
                | FLOAT_LIT
                | INTEGER_LIT
@@ -122,7 +123,8 @@ def p_1tuple(p):
     kw_parameter_types : kw_parameter_type
     simple_types : simple_type
     dimensions : dimension
-    native_body : native_element
+    native_lines : native_line
+    native_elements : native_element
     '''
     p[0] = (p[1],)
 
@@ -139,14 +141,10 @@ def p_append(p):
     primarys : primarys primary
     dimensions : dimensions dimension
     action_statements : action_statements simple_statement newlines
-    native_body : native_body native_element
+    native_lines : native_lines native_line
+    native_elements : native_elements native_element
     '''
     p[0] = p[1] + (p[2],)
-
-
-def p_native_body(p):
-    'native_body : native_body NEWLINE native_element'
-    p[0] = p[1] + (p[2], p[3])
 
 
 def p_actions(p):
@@ -163,20 +161,30 @@ def p_step1(p):
 
 def p_step2(p):
     '''
-    step : NATIVE FUNCTION native_fn_name required_parameters \
-                    set_returning_opt newlines \
-             native_body newlines
+    step : NATIVE FUNCTION native_fn_name required_parameters newlines \
+             native_lines
     '''
-    p[3].add_body(p[7])
+    p[3].add_lines(p[6])
     p[0] = ()
 
 
 def p_step3(p):
     '''
-    step : NATIVE SUBROUTINE native_sub_name required_parameters newlines \
-             native_body newlines
+    step : NATIVE FUNCTION native_fn_name required_parameters \
+             RETURNING simple_type newlines \
+             native_lines
     '''
-    p[3].add_body(p[6])
+    p[3].set_return_type(p[6])
+    p[3].add_lines(p[8])
+    p[0] = ()
+
+
+def p_step4(p):
+    '''
+    step : NATIVE SUBROUTINE native_sub_name required_parameters newlines \
+             native_lines
+    '''
+    p[3].add_lines(p[6])
     p[0] = ()
 
 

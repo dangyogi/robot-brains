@@ -68,21 +68,17 @@ function get_subroutines_by_name name$ returning p_config_t
     ======================================================================
 
 
-function iget_num_modules
-    # FIX
-    return 2
+native function iget_num_modules
+    `__num_modules__`
 
 
-function iget_num_labels imodule
-    # FIX
-    return 4
+native function iget_num_labels imodule
+    `__module_instances__[` imodule `]->num_labels`
 
 
-function get_label_name$ imodule ilabel
-    # FIX
-    return "bogus"
+native function get_label_name$ imodule ilabel
+    `__module_instances__[` imodule `]->labels[` ilabel `]->name`
 
 
-function get_label imodule ilabel returning label_t
-    # FIX
-    return "bogus"
+native function get_label imodule ilabel returning label_t
+    `__module_instances__[` imodule `]->labels[` ilabel `]`

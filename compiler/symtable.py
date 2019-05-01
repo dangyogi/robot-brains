@@ -533,10 +533,6 @@ class Subroutine(Label):
     struct_name_suffix = "_sub"
 
 
-class Native_subroutine(Subroutine):
-    pass
-
-
 class Function(Subroutine):
     struct_name_suffix = "_fn"
 
@@ -555,8 +551,22 @@ class Function(Subroutine):
         print(f" return_types {self.return_types}", end='', file=f)
 
 
-class Native_function(Function):
-    pass
+class Native_subroutine(With_parameters, Entity):
+    def __init__(self, ident):
+        Entity.__init__(self, ident)
+        With_parameters.__init__(self)
+
+    def add_lines(self, lines):
+        self.lines = lines
+
+
+class Native_function(Native_subroutine):
+    def __init__(self, ident):
+        Native_subroutine.__init__(self, ident)
+        self.type = Builtin_type(ident.type)
+
+    def set_return_type(self, return_type):
+        self.type = return_type
 
 
 class Statement(Symtable):
