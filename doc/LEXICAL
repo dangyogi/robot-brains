@@ -31,6 +31,7 @@ reserved words:
     - IS
     - LABEL
     - MODULE
+    - NATIVE
     - NOT
     - OPMODE
     - RETURN
@@ -49,7 +50,9 @@ reserved words:
 literals:
     - strings:
         - string literals use double quotes, all on one line
+          - native strings use ` rather than double quotes
         - embedded double quotes must be doubled (e.g., "He said, ""Hello!""")
+          - native strings do not allow embedded ` characters
         - no other escaping is provided (e.g., no \ escapes like \n)
         - no string literal concatenation
         - no embedded variable substitutions (as part of the literal)

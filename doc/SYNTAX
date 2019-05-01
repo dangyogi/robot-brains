@@ -10,139 +10,146 @@ operator precedence (highest to lowest)
     NOT (nonassoc)
 
 
-source_file: opmode | module
+source_file : opmode | module
 
 
-opmode: (AUTONOMOUS | TELEOP) OPMODE NEWLINES
-        {use}
-        {typedef}
+opmode : (AUTONOMOUS | TELEOP) OPMODE NEWLINES
+         {use}
+         {typedef}
 
 
-module: MODULE parameters NEWLINES
-        {use}
-        {typedef}
-        {vartype}
-        {step}
+module : MODULE parameters NEWLINES
+         {use}
+         {typedef}
+         {vartype}
+         {step}
 
 
-use: USE IDENT [AS IDENT] arguments NEWLINES
+use : USE IDENT [AS IDENT] arguments NEWLINES
 
 
-typedef: TYPE IDENT IS type NEWLINES
+typedef : TYPE IDENT IS type NEWLINES
 
 
-type: FUNCTION [TAKING parameter_types] [RETURNING 1{simple_type}]
-    | SUBROUTINE [TAKING parameter_types]
-    | LABEL [TAKING parameter_types]
-    | IDENT
-    | MODULE
+type : FUNCTION [TAKING parameter_types] [RETURNING 1{simple_type}]
+     | SUBROUTINE [TAKING parameter_types]
+     | LABEL [TAKING parameter_types]
+     | IDENT
+     | MODULE
 
 
-parameter_types: pos_parameter_types1
-               | pos_parameter_types 1{kw_parameter_type}
+parameter_types : pos_parameter_types1
+                | pos_parameter_types 1{kw_parameter_type}
 
 
-pos_parameter_types1: 1{simple_type}
-                    | {simple_type} '?' 1{simple_type}
+pos_parameter_types1 : 1{simple_type}
+                     | {simple_type} '?' 1{simple_type}
 
 
-pos_parameter_types: {simple_type} ['?' 1{simple_type}]
+pos_parameter_types : {simple_type} ['?' 1{simple_type}]
 
 
-kw_parameter_type: (KEYWORD | OPT_KEYWORD) pos_parameter_types
+kw_parameter_type : (KEYWORD | OPT_KEYWORD) pos_parameter_types
 
 
-vartype: VAR IDENT IS type NEWLINES
-       | DIM IDENT 1{'[' const_expr ']'} NEWLINES
+vartype : VAR IDENT IS type NEWLINES
+        | DIM IDENT 1{'[' const_expr ']'} NEWLINES
 
 
 step : label_decl
          {typedef}
          {vartype}
          {statement}
+     | NATIVE FUNCTION IDENT {IDENT} [RETURNING 1{simple_type}] NEWLINES
+         native_body NEWLINES
+     | NATIVE SUBROUTINE IDENT {IDENT} NEWLINES
+         native_body NEWLINES
 
 
-label_decl: FUNCTION IDENT parameters [RETURNING 1{simple_type}] NEWLINES
-          | SUBROUTINE IDENT parameters NEWLINES
-          | LABEL IDENT parameters NEWLINES
+label_decl : FUNCTION IDENT parameters [RETURNING 1{simple_type}] NEWLINES
+           | SUBROUTINE IDENT parameters NEWLINES
+           | LABEL IDENT parameters NEWLINES
 
 
-parameters: pos_parameters {kw_parameter}
+parameters : pos_parameters {kw_parameter}
 
 
-pos_parameters: {IDENT} ['?' 1{IDENT}]
+pos_parameters : {IDENT} ['?' 1{IDENT}]
 
 
-kw_parameter: (KEYWORD | OPT_KEYWORD) pos_parameters
+kw_parameter : (KEYWORD | OPT_KEYWORD) pos_parameters
 
 
-
-statement: simple_statement NEWLINES
-         | dlt
-
-
-simple_statement: CONTINUE
-                | GOTO primary {primary}
-                | SET lvalue TO: primary
-                | RETURN {primary} [FROM: primary] [TO: primary]
-                | primary arguments [RETURNING_TO: primary]
-                | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
-                | DONE
-                | DONE WITH: IDENT
+statement : simple_statement NEWLINES
+          | dlt
 
 
-dlt: '====' NEWLINE
-     1{'|' {'Y'|'N'|'-'} '|' expr NEWLINES}
-     '====' NEWLINE
-     1{action}
-     '====' NEWLINES
+simple_statement : CONTINUE
+                 | GOTO primary {primary}
+                 | SET lvalue TO: primary
+                 | RETURN {primary} [FROM: primary] [TO: primary]
+                 | primary arguments [RETURNING_TO: primary]
+                 | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
+                 | DONE
+                 | DONE WITH: IDENT
+
+
+dlt : '====' NEWLINE
+      1{'|' {'Y'|'N'|'-'} '|' expr NEWLINES}
+      '====' NEWLINE
+      1{action}
+      '====' NEWLINES
 
 
 action : '|' {'X'|' '} '|' [NEWLINES] {simple_statement NEWLINES}
 
 
-lvalue: IDENT
-      | simple_primary '.' IDENT
-      | simple_primary '[' expr ']'
+native_body : (primary | NATIVE_STRING_LIT)
+            | native_body [NEWLINE] (primary | NATIVE_STRING_LIT)
 
 
-expr: primary
-    | NOT expr
-    | '-' expr
-    | expr '^' expr
-    | expr '*' expr
-    | expr '/' expr
-    | expr '%' expr
-    | expr '+' expr
-    | expr '-' expr
-    | expr '<' expr
-    | expr '<=' expr
-    | expr '<~=' expr
-    | expr '>' expr
-    | expr '>=' expr
-    | expr '>~=' expr
-    | expr '==' expr
-    | expr '~=' expr
-    | expr '!=' expr
-    | expr '<>' expr
-    | expr '!~=' expr
-    | expr '<~>' expr
+lvalue : IDENT
+       | simple_primary '.' IDENT
+       | simple_primary '[' expr ']'
 
 
-primary: simple_primary
-       | STRING | FLOAT | INTEGER | BOOL | IDENT
-       | GOT? [(MODULE | IDENT) '.'] KEYWORD
-       | GOT? [(MODULE | IDENT) '.'] IDENT
+expr : primary
+     | NOT expr
+     | '-' expr
+     | expr '^' expr
+     | expr '*' expr
+     | expr '/' expr
+     | expr '%' expr
+     | expr '+' expr
+     | expr '-' expr
+     | expr '<' expr
+     | expr '<=' expr
+     | expr '<~=' expr
+     | expr '>' expr
+     | expr '>=' expr
+     | expr '>~=' expr
+     | expr '==' expr
+     | expr '~=' expr
+     | expr '!=' expr
+     | expr '<>' expr
+     | expr '!~=' expr
+     | expr '<~>' expr
 
 
-simple_primary: '(' expr ')'
-              | IDENT
-              | simple_primary '.' IDENT
-              | simple_primary '[' expr ']'
-              | RETURN_LABEL
-              | simple_primary '.' RETURN_LABEL
-              | '{' primary arguments '}'
+primary : simple_primary
+        | STRING | FLOAT | INTEGER | BOOL | IDENT
+        | GOT? [(MODULE | IDENT) '.'] KEYWORD
+        | GOT? [(MODULE | IDENT) '.'] IDENT
 
 
-arguments: {primary} {KEYWORD {primary}}
+simple_primary : '(' expr ')'
+               | IDENT
+               | simple_primary '.' IDENT
+               | simple_primary '[' expr ']'
+               | RETURN_LABEL
+               | simple_primary '.' RETURN_LABEL
+               | '{' primary arguments '}'
+
+
+arguments : {primary} {KEYWORD {primary}}
 

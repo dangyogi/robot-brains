@@ -533,6 +533,10 @@ class Subroutine(Label):
     struct_name_suffix = "_sub"
 
 
+class Native_subroutine(Subroutine):
+    pass
+
+
 class Function(Subroutine):
     struct_name_suffix = "_fn"
 
@@ -549,6 +553,10 @@ class Function(Subroutine):
     def dump_details(self, f):
         super().dump_details(f)
         print(f" return_types {self.return_types}", end='', file=f)
+
+
+class Native_function(Function):
+    pass
 
 
 class Statement(Symtable):

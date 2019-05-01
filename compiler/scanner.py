@@ -56,6 +56,7 @@ reserved = frozenset((
     'IS',
     'LABEL',
     'MODULE',
+    'NATIVE',
     'NOT',
     'OPMODE',
     'RETURN',
@@ -89,6 +90,7 @@ tokens = (
     'LAEQ',
     'LEQ',
     'NAEQ',
+    'NATIVE_STRING_LIT',
     'NEQ',
     'NEWLINE',
     'OPEQ',
@@ -223,8 +225,14 @@ def t_INTEGER_LIT(t):
 
 
 def t_STRING_LIT(t):
-    r'"([^"]*|"")*"'
+    r'"([^"\n]*|"")*"'
     t.value = t.value[1:-1].replace('""', '"')
+    return t
+
+
+def t_NATIVE_STRING_LIT(t):
+    r'`[^`\n]*`'
+    t.value = t.value[1:-1]
     return t
 
 

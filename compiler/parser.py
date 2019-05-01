@@ -10,9 +10,9 @@ from scanner import (
 
 from symtable import (
     last_parameter_obj, current_namespace, top_namespace, Module, Opmode,
-    Subroutine, Function, Use, Typedef, Label, Return_label,
-    DLT, Conditions, DLT_MAP, Actions, Variable, Required_parameter,
-    Optional_parameter,
+    Subroutine, Function, Native_subroutine, Native_function,
+    Use, Typedef, Label, Return_label, DLT, Conditions, DLT_MAP, Actions,
+    Variable, Required_parameter, Optional_parameter,
     Statement, Call_statement, Opeq_statement, Done_statement,
     Literal, Variable_ref, Dot, Subscript, Got_keyword, Got_param, Call_fn,
     Unary_expr, Binary_expr, Builtin_type, Typename_type, Label_type,
@@ -54,6 +54,8 @@ def p_empty_tuple(p):
 
 def p_first(p):
     '''
+    native_element : primary
+                   | NATIVE_STRING_LIT
     const_expr : STRING_LIT
                | FLOAT_LIT
                | INTEGER_LIT
@@ -120,6 +122,7 @@ def p_1tuple(p):
     kw_parameter_types : kw_parameter_type
     simple_types : simple_type
     dimensions : dimension
+    native_body : native_element
     '''
     p[0] = (p[1],)
 
@@ -136,8 +139,14 @@ def p_append(p):
     primarys : primarys primary
     dimensions : dimensions dimension
     action_statements : action_statements simple_statement newlines
+    native_body : native_body native_element
     '''
     p[0] = p[1] + (p[2],)
+
+
+def p_native_body(p):
+    'native_body : native_body NEWLINE native_element'
+    p[0] = p[1] + (p[2], p[3])
 
 
 def p_actions(p):
@@ -145,11 +154,30 @@ def p_actions(p):
     p[0] = p[1] + p[2]
 
 
-def p_step(p):
+def p_step1(p):
     '''
     step : label_decl typedefs vartypes statements
     '''
     p[0] = (p[1],) + p[4]
+
+
+def p_step2(p):
+    '''
+    step : NATIVE FUNCTION native_fn_name required_parameters \
+                    set_returning_opt newlines \
+             native_body newlines
+    '''
+    p[3].add_body(p[7])
+    p[0] = ()
+
+
+def p_step3(p):
+    '''
+    step : NATIVE SUBROUTINE native_sub_name required_parameters newlines \
+             native_body newlines
+    '''
+    p[3].add_body(p[6])
+    p[0] = ()
 
 
 def p_paste(p):
@@ -567,9 +595,19 @@ def p_fn_name(p):
     p[0] = Function(p[1])
 
 
+def p_native_fn_name(p):
+    'native_fn_name : IDENT'
+    p[0] = Native_function(p[1])
+
+
 def p_sub_name(p):
     'sub_name : IDENT'
     p[0] = Subroutine(p[1])
+
+
+def p_native_sub_name(p):
+    'native_sub_name : IDENT'
+    p[0] = Native_subroutine(p[1])
 
 
 def p_label_name(p):
