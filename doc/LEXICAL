@@ -23,6 +23,7 @@ reserved words:
     - BOOLEAN
     - CONTINUE
     - DIM
+    - DONE
     - FLOAT
     - FUNCTION
     - GOTO
@@ -33,6 +34,7 @@ reserved words:
     - NOT
     - OPMODE
     - RETURN
+    - RETURN_LABEL
     - RETURNING
     - RETURNING_TO:
     - SET

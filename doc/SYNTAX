@@ -87,6 +87,8 @@ simple_statement: CONTINUE
                 | RETURN {primary} [FROM: primary] [TO: primary]
                 | primary arguments [RETURNING_TO: primary]
                 | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
+                | DONE
+                | DONE WITH: IDENT
 
 
 dlt: '====' NEWLINE
@@ -100,8 +102,8 @@ action : '|' {'X'|' '} '|' [NEWLINES] {simple_statement NEWLINES}
 
 
 lvalue: IDENT
-      | primary '.' IDENT
-      | primary '[' expr ']'
+      | simple_primary '.' IDENT
+      | simple_primary '[' expr ']'
 
 
 expr: primary
@@ -127,13 +129,19 @@ expr: primary
     | expr '<~>' expr
 
 
-primary: STRING | FLOAT | INTEGER | BOOL | IDENT
-       | '(' expr ')'
-       | primary '.' IDENT
-       | primary '[' expr ']'
+primary: simple_primary
+       | STRING | FLOAT | INTEGER | BOOL | IDENT
        | GOT? [(MODULE | IDENT) '.'] KEYWORD
        | GOT? [(MODULE | IDENT) '.'] IDENT
-       | '{' primary arguments '}'
+
+
+simple_primary: '(' expr ')'
+              | IDENT
+              | simple_primary '.' IDENT
+              | simple_primary '[' expr ']'
+              | RETURN_LABEL
+              | simple_primary '.' RETURN_LABEL
+              | '{' primary arguments '}'
 
 
 arguments: {primary} {KEYWORD {primary}}

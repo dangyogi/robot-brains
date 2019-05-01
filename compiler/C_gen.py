@@ -167,7 +167,7 @@ def gen_program(opmode):
         #           program.
         # These are in bottom-up order based on "uses".
         modules = list(tsort_modules(opmode))
-        print("modules", modules)
+        #print("modules", modules)
 
         def do(fn, top_down=False):
             ans = []
@@ -852,26 +852,34 @@ def tsort_modules(opmode):
     for name, m in opmode.modules_seen.items():
         assert name == m.name
 
-    # {parent: set(children)}
-    order = dict(gen_dependencies(opmode.modules_seen))
+    # {parent: set(uses)}
+    order = dict(gen_dependencies(opmode))
     #print("tsort_modules, order:", order)
-    for children in order.values():
-        for child in children:
-            assert child in order
+    for uses in order.values():
+        for use in uses:
+            assert use in order
+
+    builtins = opmode.modules_seen['builtins']
 
     while order:
-        leaves = frozenset(parent
-                           for parent, children in order.items()
-                            if not children)
+        leaves = set(parent
+                     for parent, uses in order.items()
+                      if not uses)
+        if len(leaves) > 1 and builtins in leaves:
+            leaves.remove(builtins)
+        if len(leaves) > 1 and opmode in leaves:
+            leaves.remove(opmode)
         for module in sorted(leaves, key=lambda m: m.name):
             yield module
             del order[module]
-        for children in order.values():
-            children -= leaves
-    yield opmode
+        for uses in order.values():
+            uses -= leaves
+    #yield opmode
 
 
-def gen_dependencies(modules_seen):
-    for m in modules_seen.values():
-        yield (m, set(modules_seen[x.module_name.value]
-                      for x in get_uses(m)))
+def gen_dependencies(opmode):
+    modules_seen = opmode.modules_seen
+    all_modules = tuple(modules_seen.values()) + (opmode,)
+    for m in all_modules:
+        uses = set(modules_seen[x.module_name.value] for x in get_uses(m))
+        yield m, uses

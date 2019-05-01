@@ -48,6 +48,7 @@ reserved = frozenset((
     'BOOLEAN',
     'CONTINUE',
     'DIM',
+    'DONE',
     'FLOAT',
     'FUNCTION',
     'GOTO',
@@ -58,6 +59,7 @@ reserved = frozenset((
     'NOT',
     'OPMODE',
     'RETURN',
+    'RETURN_LABEL',
     'RETURNING',
     'SET',
     'STRING',
@@ -94,6 +96,7 @@ tokens = (
     'RETURNING_TO',
     'STRING_LIT',
     'TO',        # TO:  expanded_kw
+    'WITH',      # WITH:  expanded_kw
 
 ) + tuple(reserved)
 
@@ -236,6 +239,9 @@ def t_KEYWORD(t):
             return t
         if t.value.lower() == 'to:':
             t.type = 'TO'
+            return t
+        if t.value.lower() == 'with:':
+            t.type = 'WITH'
             return t
     t.value = Token(t)
     return t

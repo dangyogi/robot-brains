@@ -23,21 +23,21 @@ var isStarted? is boolean
 
 
 function get_subroutines_by_name name$ returning p_config_t
-  goto ret_pointer p_config
+  goto return_label p_config
 
   subroutine p_config ?c_yield: c_yield ?c_done: c_done ?c_config: c_config
     var c_yield is label_l_t
     var c_done is label
     var c_config is c_config_t
     # FIX: how to make this optional?
-    c_config p_next: p_next next_routine: p_done
+    c_config p_next: next_routine next_routine: p_done
     set imodule_index to: 0
     set ilabel_index to: 0
     return
 
   label next_module
     ======================================================================
-    | YN | imodule_index < {get_num_modules}
+    | YN | imodule_index < {iget_num_modules}
     ======================================================================
     | X  | set ilabel_index to: 0
     |    | goto next_routine
@@ -51,14 +51,14 @@ function get_subroutines_by_name name$ returning p_config_t
 
   label next_routine
     ======================================================================
-    | YN | ilabel_index < {get_num_labels imodule_index}
+    | YN | ilabel_index < {iget_num_labels imodule_index}
     ======================================================================
     | X  | continue
     |  X | goto next_module
     ======================================================================
 
     ======================================================================
-    | YN | {get_label_name imodule_index ilabel_index} == name$
+    | YN | {get_label_name$ imodule_index ilabel_index} == name$
     ======================================================================
     | X  | set i to: ilabel_index
     |    | ilabel_index += 1
@@ -67,3 +67,22 @@ function get_subroutines_by_name name$ returning p_config_t
     |    | goto next_routine
     ======================================================================
 
+
+function iget_num_modules
+    # FIX
+    return 2
+
+
+function iget_num_labels imodule
+    # FIX
+    return 4
+
+
+function get_label_name$ imodule ilabel
+    # FIX
+    return "bogus"
+
+
+function get_label imodule ilabel returning label_t
+    # FIX
+    return "bogus"

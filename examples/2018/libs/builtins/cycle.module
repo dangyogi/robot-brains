@@ -101,7 +101,7 @@ subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
 subroutine next
     # Returns on next cycle
     done
-    push_task ret_pointer returning_to: what_next
+    push_task return_label returning_to: what_next
 
 
 subroutine push_task task ?task_list: itask_list
@@ -128,7 +128,7 @@ subroutine schedule subr
 
     # This will return from this subroutine to let the main thread continue in
     # this cycle
-    push_task ret_pointer task_list: i_current
+    push_task return_label task_list: i_current
 
     # Start the new thread
     subr returning_to: what_next

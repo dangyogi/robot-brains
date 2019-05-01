@@ -638,6 +638,11 @@ class Opeq_statement(Statement):
     pass
 
 
+class Done_statement(Statement):
+    # done [with: label]
+    pass
+
+
 class Conditions(Symtable):
     r'''DLT conditions section.
 
@@ -1037,6 +1042,21 @@ class Binary_expr(Expr):
         # FIX: type check and self.type has to be done for each instance...
 
 
+class Return_label(Expr):
+    def __init__(self, lexpos, lineno, label=None):
+        #print("Return_label", lexpos, lineno, label)
+        self.lexpos = lexpos
+        self.lineno = lineno
+        self.filename = scanner.lexer.filename
+        self.label = label      # IDENT
+
+    def prepare_step(self, opmode, module, last_label, last_fn_subr):
+        super().prepare_step(opmode, module, last_label, last_fn_subr)
+        if self.label is None:
+            self.label = last_label
+        # FIX: lookup self.label
+
+
 def indent_str(indent):
     return " "*indent
 
@@ -1052,9 +1072,5 @@ def lookup(ident, module, opmode):
     obj = opmode.modules_seen['builtins'].lookup(ident, error_not_found=False)
     if obj is not None:
         return obj
-
-    # FIX: Add check for get_num_modules, get_num_labels, get_label_name,
-    #                    get_label
-
     scanner.syntax_error("Not found",
                          ident.lexpos, ident.lineno, ident.filename)

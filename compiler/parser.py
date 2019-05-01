@@ -10,9 +10,10 @@ from scanner import (
 
 from symtable import (
     last_parameter_obj, current_namespace, top_namespace, Module, Opmode,
-    Subroutine, Function, Use, Typedef, Label,
+    Subroutine, Function, Use, Typedef, Label, Return_label,
     DLT, Conditions, DLT_MAP, Actions, Variable, Required_parameter,
-    Optional_parameter, Statement, Call_statement, Opeq_statement,
+    Optional_parameter,
+    Statement, Call_statement, Opeq_statement, Done_statement,
     Literal, Variable_ref, Dot, Subscript, Got_keyword, Got_param, Call_fn,
     Unary_expr, Binary_expr, Builtin_type, Typename_type, Label_type,
 )
@@ -230,6 +231,20 @@ def p_primary_literal(p):
     p[0] = Literal(p[1])
 
 
+def p_return_label1(p):
+    """
+    simple_primary : RETURN_LABEL
+    """
+    p[0] = Return_label(p.lexpos(1), p.lineno(1))
+
+
+def p_return_label2(p):
+    """
+    simple_primary : simple_primary '.' RETURN_LABEL
+    """
+    p[0] = Return_label(p.lexpos(3), p.lineno(3), p[1])
+
+
 def p_primary_ident(p):
     "simple_primary : IDENT"
     p[0] = Variable_ref(p[1])
@@ -415,6 +430,20 @@ def p_simple_statement5(p):
     simple_statement : primary OPEQ primary
     """
     p[0] = Opeq_statement(p.lineno(1), p[1], p[2], p[3])
+
+
+def p_simple_statement6(p):
+    r"""
+    simple_statement : extended_kws DONE normal_kws
+    """
+    p[0] = Done_statement(p.lineno(2))
+
+
+def p_simple_statement7(p):
+    r"""
+    simple_statement : extended_kws DONE WITH IDENT normal_kws
+    """
+    p[0] = Done_statement(p.lineno(2), p[4])
 
 
 def p_file(p):
