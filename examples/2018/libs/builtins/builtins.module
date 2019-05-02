@@ -22,6 +22,11 @@ var isAlive? is boolean
 var isStarted? is boolean
 
 
+native subroutine abort message$
+    `printf(stderr, "%s\n", ` message$ `);`
+    `exit(1);`
+
+
 function get_subroutines_by_name name$ returning p_config_t
   goto return_label p_config
 

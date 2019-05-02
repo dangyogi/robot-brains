@@ -1,11 +1,17 @@
 # symtable.py
 
-from collections import OrderedDict, ChainMap
+from collections import OrderedDict
+from copy import deepcopy
+from math import isclose
 
 import scanner
 
 
 Last_parameter_obj = None
+
+
+def aeq(x, y):
+    return isclose(x, y, rel_tol=0, abs_tol=1e-6)
 
 
 def last_parameter_obj():
@@ -20,10 +26,36 @@ def top_namespace():
     return scanner.Namespaces[0]
 
 
-class Symtable:
+class Hook_base:
+    r'''Implements hook capability.
+
+    - Only allows one fn to be registered per cls, hook_name.
+    - Only calls the first fn found (in __mro__ order) when the hook is
+      triggered.
+    '''
+    hooks = {}    # {(cls, hook_name): fn}
+
+    @classmethod
+    def add_hook(cls, hook_name, fn):
+        assert (cls, hook_name) not in Hook_base.hooks, \
+               f"More than one {hook_name!r} hook on {cls.__name__}"
+        Hook_base.hooks[cls, hook_name] = fn
+    
+    def run_hook(self, hook_name, *args, **kws):
+        r'''Passes self to the hook fn, in addition to *args and **kws.
+
+        Returns result of hook fn call -- None if no hook fn.
+        '''
+        for c in self.__class__.__mro__:
+            fn = Hook_base.hooks.get((c, hook_name))
+            if fn is not None:
+                return fn(self, *args, **kws)
+
+
+class Symtable(Hook_base):
     r'''Root of all symtable classes.
 
-    Defines dump.
+    Defines dump, prepare and prepare_step.
     '''
     def dump(self, f, indent=0):
         print(f"{indent_str(indent)}{self.__class__.__name__}", end='', file=f)
@@ -37,9 +69,32 @@ class Symtable:
     def dump_contents(self, f, indent):
         pass
 
+    def prepare(self, module):
+        r'''Called once per instance.
+        '''
+        self.do_prepare(module)
+        return self.run_hook("prepare", module)
+
+    def do_prepare(self, module):
+        r'''Override this in the subclasses.
+        '''
+        pass
+
+    def prepare_step(self, module, last_label, last_fn_subr):
+        r'''Called once per instance.
+        '''
+        self.do_prepare_step(module, last_label, last_fn_subr)
+        return self.run_hook("prepare_step", module, last_label,
+                             last_fn_subr)
+
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        r'''Override this in the subclasses.
+        '''
+        pass
+
 
 class Entity(Symtable):
-    r'''Named entities within the current namespace.
+    r'''Named entities within a namespace.
     '''
     def __init__(self, ident):
         self.name = ident
@@ -55,16 +110,6 @@ class Entity(Symtable):
     def dump_details(self, f):
         super().dump_details(f)
         print(f" {self.name.value}", end='', file=f)
-
-    def prepare(self, opmode, module):
-        r'''Called once (per module, not instance).
-        '''
-        pass
-
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        r'''Called once (per module, not instance).
-        '''
-        pass
 
 
 class Variable(Entity):
@@ -90,12 +135,12 @@ class Variable(Entity):
         super().dump_details(f)
         print(f" type={self.type}", end='', file=f)
 
-    def prepare(self, opmode, module):
-        super().prepare(opmode, module)
+    def do_prepare(self, module):
+        super().do_prepare(module)
         if not self.dimensions:
             self.set_bit = module.next_set_bit
             module.next_set_bit += 1
-        self.type.prepare(opmode, module)
+        self.type.prepare(module)
 
 
 class Required_parameter(Symtable):
@@ -117,7 +162,8 @@ class Required_parameter(Symtable):
         if hasattr(self, 'param_pos_number'):
             print(f" param_pos_number={self.param_pos_number}", end='', file=f)
 
-    def prepare(self, opmode, module):
+    def do_prepare(self, module):
+        super().do_prepare(module)
         self.type = self.variable.type
 
 
@@ -125,26 +171,48 @@ class Optional_parameter(Required_parameter):
     r'''
     self.passed_bit assigned in Param_block.assign_passed_bits.  This is the
     bit number, not the bit mask.
+
+    self.passed is set to True/False at compile time for module parameters.
     '''
     pass
 
 
 class Use(Entity):
-    def __init__(self, ident, module_name, arguments):
+    def __init__(self, ident, module_name, pos_arguments, kw_arguments):
         Entity.__init__(self, ident)
         self.module_name = module_name
-        self.arguments = arguments
+        self.pos_arguments = pos_arguments  # (primary, ...)
+        self.kw_arguments = kw_arguments    # ((KEYWORD, (primary, ...)), ...)
 
     def __repr__(self):
         return f"<Use {self.name.value} {self.module_name.value}>"
 
-    def prepare(self, opmode, module):
-        super().prepare(opmode, module)
-        self.module = opmode.modules_seen[self.module_name.value]
+    def copy_module(self):
+        self.module = \
+          deepcopy(Opmode_module.modules_seen[self.module_name.value])
+        self.module.link_uses()
 
     def dump_details(self, f):
         super().dump_details(f)
         print(f" module_name={self.module_name}", end='', file=f)
+
+    def prepare_used_module(self, module):
+        r'''
+        Broken out so that builtins and opmode get prepared before used modules
+        so that their Entities are initialized before being referenced in used
+        modules.
+        '''
+        #print("Use.prepare_used_module", module, self.module_name)
+        for expr in self.pos_arguments:
+            expr.prepare_step(module, None, None)
+        for _, pos_arguments in self.kw_arguments:
+            for expr in pos_arguments:
+                expr.prepare_step(module, None, None)
+        #print("Use.prepare_used_module", module, self.module_name,
+        #      "done with arguments")
+        self.module.prepare_module()
+        self.run_hook("prepare_used_module", module)
+        #print("Use.prepare_used_module", module, self.module_name, "done")
 
 
 class Typedef(Entity):
@@ -170,22 +238,25 @@ class Typedef(Entity):
         super().dump_details(f)
         print(f" type={self.type}", end='', file=f)
 
-    def prepare(self, opmode, module):
-        super().prepare(opmode, module)
-        self.type.prepare(opmode, module)
+    def do_prepare(self, module):
+        super().do_prepare(module)
+        self.type.prepare(module)
 
 
 class Type(Symtable):
-    def prepare(self, opmode, module):
-        pass
+    def do_prepare(self, module):
+        super().do_prepare(module)
 
 
 class Builtin_type(Type):
     def __init__(self, name):
-        self.name = name  # str
+        self.name = name.lower()  # str
 
     def __repr__(self):
         return f"<Builtin_type {self.name}>"
+
+    def is_numeric(self):
+        return self.name in ('float', 'integer')
 
 
 class Typename_type(Type):
@@ -195,12 +266,12 @@ class Typename_type(Type):
     def __repr__(self):
         return f"<Typename {self.ident.value}>"
 
-    def prepare(self, opmode, module):
-        super().prepare(opmode, module)
+    def do_prepare(self, module):
+        super().do_prepare(module)
 
         # types can not be passed as module parameters, so this will be the
         # same result for all module instances...
-        self.typedef = lookup(self.ident, module, opmode)
+        self.typedef = lookup(self.ident, module)
         if not isinstance(self.typedef, Typedef):
             scanner.syntax_error("Must be defined as a TYPE, "
                                    f"not a {self.typedef.__class__.__name__}",
@@ -221,7 +292,12 @@ class Label_type(Type):
             assert len(taking_blocks[0]) == 2
             self.required_params, self.optional_params = taking_blocks[0]
             self.kw_params = taking_blocks[1]
-        self.return_types = return_types
+        if self.label_type in ('subroutine', 'native_subroutine'):
+            self.return_label_type = Label_type('label', None)
+        elif self.label_type in ('function', 'native_function'):
+            self.return_types = return_types
+            self.return_label_type = Label_type('label',
+                                                ((return_types, ()), ()))
 
     def __repr__(self):
         info = []
@@ -239,6 +315,9 @@ class Label_type(Type):
 
 
 class Param_block(Symtable):
+    r'''
+    self.passed is set to True/False at compile time for module parameters.
+    '''
     def __init__(self, name="__pos__", optional=False):
         self.name = name
         self.required_params = []
@@ -286,11 +365,12 @@ class Param_block(Symtable):
                                  ident.lexpos, ident.lineno, ident.filename)
         return None
 
-    def prepare(self, opmode, module):
-        #print("Param_block.prepare")
+    def do_prepare(self, module):
+        super().do_prepare(module)
+        #print("Param_block.do_prepare")
         for p in self.gen_parameters():
-            #print("Param_block.prepare", p)
-            p.prepare(opmode, module)
+            #print("Param_block.do_prepare", p)
+            p.prepare(module)
 
     def assign_passed_bits(self, next_bit_number):
         def get_bit_number():
@@ -318,12 +398,17 @@ class Namespace(Symtable):
     '''
     def __init__(self, name):
         self.name = name
-        self.names = {}
+        self.names = OrderedDict()
         #print(f"scanner.Namespaces.append({ident})")
         scanner.Namespaces.append(self)
 
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.name}>"
+
+    def filter(self, cls):
+        return (entity
+                for entity in self.names.values()
+                 if type(entity) == cls)
 
     def lookup(self, ident, error_not_found=True):
         r'''Look up ident in self.names.
@@ -380,6 +465,11 @@ class Opmode(Namespace):
             # ... does not have lowered() keys!
             self.modules_seen = modules_seen
         self.next_set_bit = 0
+        self.register()
+
+    def register(self):
+        global Opmode_module
+        Opmode_module = self
 
     def set_in_namespace(self):
         pass
@@ -398,10 +488,35 @@ class Opmode(Namespace):
                 print(f"{indent_str(indent)}{name}:", file=f)
                 module.dump(f, indent + 2)
 
-    def prepare(self, opmode, module):
-        #print("Opmode.prepare", self.__class__.__name__, self.name)
+    def setup(self):
+        print("setup linking uses")
+        builtins = self.modules_seen['builtins']
+        builtins.link_uses()
+        self.link_uses()
+        print("setup doing prepare")
+        builtins.prepare_module()
+        self.prepare_module()
+        print("setup done")
+
+    def link_uses(self):
+        #print(self.name, self.__class__.__name__, "link_uses")
+        for use in self.filter(Use):
+            #print(self.name, "link_uses doing", use)
+            use.copy_module()
+
+    def prepare_module(self):
+        #print(self.name, self.__class__.__name__, "prepare_module")
+        self.do_prepare_module()
+        return self.run_hook("prepare_module")
+
+    def do_prepare_module(self):
+        #print("Opmode.do_prepare_module", self.__class__.__name__, self.name)
         for obj in self.names.values():
-            obj.prepare(opmode, module)
+            obj.prepare(self)
+        self.prepare(self)   # declared in With_parameters
+        for use in self.filter(Use):
+            #print(self.name, "link_uses doing", use)
+            use.prepare_used_module(self)
         print(self.name, self.__class__.__name__,
               "number of var-set bits used", self.next_set_bit)
 
@@ -451,10 +566,10 @@ class With_parameters(Symtable):
             scanner.syntax_error("Parameter Not Found",
                                  ident.lexpos, ident.lineno, ident.filename)
 
-    def prepare(self, opmode, module):
-        super().prepare(opmode, module)
+    def do_prepare(self, module):
+        super().do_prepare(module)
         for pb in self.gen_param_blocks():
-            pb.prepare(opmode, module)
+            pb.prepare(module)
         self.check_for_duplicate_names()
         self.assign_passed_bits()
 
@@ -489,9 +604,19 @@ class With_parameters(Symtable):
 class Module(With_parameters, Opmode):
     r'''self.steps is a tuple of labels, statements and DLTs.
     '''
+    type = Builtin_type("module")
+    immediate = True
+
     def __init__(self):
         Opmode.__init__(self)
         With_parameters.__init__(self)
+
+    def register(self):
+        pass
+
+    @property
+    def value(self):
+        return self
 
     def add_steps(self, steps):
         self.steps = steps
@@ -501,26 +626,31 @@ class Module(With_parameters, Opmode):
         for step in self.steps:
             step.dump(f, indent)
 
-    def prepare(self, opmode, module):
-        super().prepare(opmode, module)
+    def do_prepare_module(self):
+        super().do_prepare_module()
         last_label = None
         last_fn_subr = None
         for step in self.steps:
             if isinstance(step, Subroutine):
                 last_fn_subr = step
-            if isinstance(step, Label):
+            if isinstance(step, Label) and not step.hidden:
                 last_label = step
             assert last_label is not None
-            step.prepare_step(opmode, module, last_label, last_fn_subr)
+            step.prepare_step(self, last_label, last_fn_subr)
+            # FIX: Add check for final steps at end of blocks, and not before
 
 
 class Label(With_parameters, Entity):
-    def __init__(self, ident):
+    immediate = True
+
+    def __init__(self, ident, hidden=False):
         Entity.__init__(self, ident)
         With_parameters.__init__(self)
+        self.hidden = hidden
 
-    def prepare(self, opmode, module):
-        super().prepare(opmode, module)
+    def do_prepare(self, module):
+        #print(self.__class__.__name__, "do_prepare", self.name)
+        super().do_prepare(module)
         self.type = Label_type(self.__class__.__name__,
                                self.as_taking_blocks(),
                                self.get_returning_types())
@@ -528,14 +658,16 @@ class Label(With_parameters, Entity):
     def get_returning_types(self):
         return ()
 
+    @property
+    def value(self):
+        return self
+
 
 class Subroutine(Label):
-    struct_name_suffix = "_sub"
+    pass
 
 
 class Function(Subroutine):
-    struct_name_suffix = "_fn"
-
     def __init__(self, ident):
         Subroutine.__init__(self, ident)
         self.return_types = Builtin_type(ident.type),
@@ -559,14 +691,26 @@ class Native_subroutine(With_parameters, Entity):
     def add_lines(self, lines):
         self.lines = lines
 
+    def do_prepare(self, module):
+        super().do_prepare(module)
+        self.type = Label_type(self.__class__.__name__,
+                               self.as_taking_blocks(),
+                               self.get_returning_types())
+
+    def get_returning_types(self):
+        return ()
+
 
 class Native_function(Native_subroutine):
     def __init__(self, ident):
         Native_subroutine.__init__(self, ident)
-        self.type = Builtin_type(ident.type)
+        self.return_type = Builtin_type(ident.type)
 
     def set_return_type(self, return_type):
-        self.type = return_type
+        self.return_type = return_type
+
+    def get_returning_types(self):
+        return self.return_type,
 
 
 class Statement(Symtable):
@@ -592,10 +736,11 @@ class Statement(Symtable):
         print(f" lineno {self.lineno}", end='', file=f)
         print(f" {self.args}", end='', file=f)
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
         def _prepare(obj):
             if isinstance(obj, Symtable):
-                obj.prepare_step(opmode, module, last_label, last_fn_subr)
+                obj.prepare_step(module, last_label, last_fn_subr)
             elif isinstance(obj, (list, tuple)):
                 for x in obj:
                     _prepare(x)
@@ -758,9 +903,10 @@ class Conditions(Symtable):
                                  self.dlt_mask.lexpos + missing_columns[0],
                                  self.dlt_mask.lineno)
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
         for expr in self.exprs:
-            expr.prepare_step(opmode, module, last_label, last_fn_subr)
+            expr.prepare_step(module, last_label, last_fn_subr)
 
     def gen_code(self, f, indent=0):
         prefix = indent_str(indent)
@@ -813,8 +959,8 @@ class DLT_MAP(Symtable):
         super().dump_details(f)
         print(f" {self.map.value}", end='', file=f)
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        pass
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
 
 
 class Actions(Symtable):
@@ -843,9 +989,10 @@ class Actions(Symtable):
         ans = sorted(frozenset(range(num_columns)) - seen)
         return ans
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
         for action in self.actions:
-            action.prepare_step(opmode, module, last_label, last_fn_subr)
+            action.prepare_step(module, last_label, last_fn_subr)
 
     def gen_code(self, f, indent=0):
         # FIX: this is old and obsolete.  Delete???
@@ -866,50 +1013,76 @@ class DLT(Symtable):
         self.actions = actions          # Actions instance
         conditions.sync_actions(actions)
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        self.conditions.prepare_step(opmode, module, last_label, last_fn_subr)
-        self.actions.prepare_step(opmode, module, last_label, last_fn_subr)
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        self.conditions.prepare_step(module, last_label, last_fn_subr)
+        self.actions.prepare_step(module, last_label, last_fn_subr)
 
 
 class Expr(Symtable):
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        pass
+    immediate = False   # True iff value known at compile time
+
+    def __init__(self, lexpos, lineno):
+        self.lexpos = lexpos
+        self.lineno = lineno
+        self.filename = scanner.filename()
+
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+
+    def is_numeric(self):
+        return False
+
+    def is_boolean(self):
+        return False
 
 
 class Literal(Expr):
-    def __init__(self, value):
+    immediate = True
+
+    def __init__(self, lexpos, lineno, value):
+        Expr.__init__(self, lexpos, lineno)
         self.value = value
         if isinstance(value, bool):
-            self.type = 'boolean'
+            self.type = Builtin_type('boolean')
         elif isinstance(value, int):
-            self.type = 'integer'
+            self.type = Builtin_type('integer')
         elif isinstance(value, float):
-            self.type = 'float'
+            self.type = Builtin_type('float')
         elif isinstance(value, str):
-            self.type = 'string'
+            self.type = Builtin_type('string')
 
     def __repr__(self):
         return f"<Literal {self.value!r}>"
 
+    def is_numeric(self):
+        return self.type in ('integer', 'float')
+
+    def is_boolean(self):
+        return self.type == 'boolean'
+
 
 class Variable_ref(Expr):
     def __init__(self, ident):
+        Expr.__init__(self, ident.lexpos, ident.lineno)
         self.ident = ident
 
     def __repr__(self):
         return f"<Variable_ref {self.ident.value}>"
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        super().prepare_step(opmode, module, last_label, last_fn_subr)
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
 
         # These should be the same for all instances (since the type is
         # defined in the module and can't be passed in as a module parameter).
-        self.referent = lookup(self.ident, module, opmode)
+        self.referent = lookup(self.ident, module)
+        #print("Variable_ref", self.ident, "found", self.referent)
         self.type = self.referent.type
 
 
 class Dot(Expr):
     def __init__(self, expr, ident):
+        Expr.__init__(self, expr.lexpos, expr.lineno)
         self.expr = expr
         self.ident = ident
 
@@ -917,44 +1090,52 @@ class Dot(Expr):
         return f"<Dot {self.expr} {self.ident.value}>"
 
     # self.type has to be done for each instance...
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        super().prepare_step(opmode, module, last_label, last_fn_subr)
-        self.expr.prepare_step(opmode, module, last_label, last_fn_subr)
-        # FIX: self.expr should evaluate to a module at compile time
-        #      then lookup self.ident at compile time
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        self.expr.prepare_step(module, last_label, last_fn_subr)
+        if not self.expr.immediate or not isinstance(self.expr.value, Module):
+            scanner.syntax_error("Module expected",
+                                 self.expr.lexpos, self.expr.lineno,
+                                 self.expr.filename)
+        self.referent = self.expr.value.lookup(self.ident)
+        self.type = self.referent.type
+        if self.referent.immediate:
+            self.value = self.referent.value
+            self.immediate = True
 
 
 class Subscript(Expr):
     def __init__(self, array_expr, subscript_expr):
+        Expr.__init__(self, array_expr.lexpos, array_expr.lineno)
         self.array_expr = array_expr
         self.subscript_expr = subscript_expr
 
     def __repr__(self):
         return f"<Subscript {self.array_expr} {self.subscript_expr}>"
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        super().prepare_step(opmode, module, last_label, last_fn_subr)
-        self.array_expr.prepare_step(opmode, module, last_label, last_fn_subr)
-        self.subscript_expr.prepare_step(opmode, module, last_label,
-                                         last_fn_subr)
-        # self.type has to be done for each instance...
-        # self.type = self.array_expr.type
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        self.array_expr.prepare_step(module, last_label, last_fn_subr)
+        self.subscript_expr.prepare_step(module, last_label, last_fn_subr)
+        self.type = self.array_expr.type
 
 
 class Got_keyword(Expr):
     r'''self.label and self.bit_number set in prepare.
     '''
-    def __init__(self, keyword, label=None, module=False):
+    type = Builtin_type("boolean")
+
+    def __init__(self, lexpos, lineno, keyword, label=None, module=False):
+        Expr.__init__(self, lexpos, lineno)
         self.keyword = keyword
         self.label = label
         self.module = module
-        self.type = 'boolean'
 
     def __repr__(self):
         return f"<Got_keyword {self.keyword}>"
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        super().prepare_step(opmode, module, last_label, last_fn_subr)
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
         if self.module:
             pb = module.kw_parameters.get(self.keyword.value.lower())
         else:
@@ -970,22 +1151,27 @@ class Got_keyword(Expr):
                                  self.keyword.lexpos, self.keyword.lineno,
                                  self.keyword.filename)
         self.bit_number = pb.kw_passed_bit
+        if self.module:
+            self.immediate = True
+            self.value = pb.passed
 
 
 class Got_param(Expr):
     r'''self.label and self.bit_number set in prepare.
     '''
-    def __init__(self, ident, label=None, module=False):
+    type = Builtin_type("boolean")
+
+    def __init__(self, lexpos, lineno, ident, label=None, module=False):
+        Expr.__init__(self, lexpos, lineno)
         self.ident = ident
         self.label = label
         self.module = module
-        self.type = 'boolean'
 
     def __repr__(self):
         return f"<Got_param {self.ident.value}>"
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        super().prepare_step(opmode, module, last_label, last_fn_subr)
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
         if self.module:
             obj = module
         else:
@@ -998,6 +1184,9 @@ class Got_param(Expr):
             if param is not None:
                 if isinstance(param, Optional_parameter):
                     self.bit_number = param.passed_bit
+                    if self.module:
+                        self.immediate = True
+                        self.value = param.passed
                     break
                 else:
                     scanner.syntax_error("Must be an optional parameter",
@@ -1011,41 +1200,90 @@ class Got_param(Expr):
 
 
 class Call_fn(Expr):
-    def __init__(self, fn, arguments):
+    def __init__(self, fn, pos_arguments, kw_arguments):
+        Expr.__init__(self, fn.lexpos, fn.lineno)
         self.fn = fn
-        self.pos_arguments, self.kw_arguments = arguments
+        self.pos_arguments = pos_arguments  # (primary, ...)
+        self.kw_arguments = kw_arguments    # ((KEYWORD, (primary, ...)), ...)
 
     def __repr__(self):
         return f"<Call_fn {self.fn} {self.pos_arguments} {self.kw_arguments}>"
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
+    def do_prepare_step(self, module, last_label, last_fn_subr):
         # self.type has to be done for each instance...
-        super().prepare_step(opmode, module, last_label, last_fn_subr)
-        print("Call_fn.prepare_step", self.fn)
-        self.fn.prepare_step(opmode, module, last_label, last_fn_subr)
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        print("Call_fn.do_prepare_step", self.fn)
+        self.fn.prepare_step(module, last_label, last_fn_subr)
         for expr in self.pos_arguments:
-            expr.prepare_step(opmode, module, last_label, last_fn_subr)
+            expr.prepare_step(module, last_label, last_fn_subr)
         for _, pos_arguments in self.kw_arguments:
             for expr in pos_arguments:
-                expr.prepare_step(opmode, module, last_label, last_fn_subr)
+                expr.prepare_step(module, last_label, last_fn_subr)
+        # FIX: Check for only one return_types?
+        self.type = self.fn.type.return_types[0]
+        # FIX: Check arguments number/types against self.fn.type parameter
+        #      number/types
 
 
 class Unary_expr(Expr):
-    def __init__(self, operator, expr):
-        self.operator = operator
+    def __init__(self, lexpos, lineno, operator, expr):
+        Expr.__init__(self, lexpos, lineno)
+        self.operator = operator.lower()
         self.expr = expr
 
     def __repr__(self):
         return f"<Unary_expr {self.operator} {self.expr}>"
 
-    def prepare_step(self, opmode, module, last_label):
-        super().prepare_step(opmode, module, last_label)
-        self.expr.prepare_step(opmode, module, last_label)
-        # FIX: type check and self.type has to be done for each instance...
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        self.expr.prepare_step(module, last_label, last_fn_subr)
+        if operator == '-':
+            if not self.expr.type.is_numeric():
+                scanner.syntax_error("Must be a numeric type",
+                                     self.expr.lexpos, self.expr.lineno,
+                                     self.expr.filename)
+            self.type = self.expr.type
+            if self.expr.immedate:
+                self.immediate = True
+                self.value = -self.expr.value
+        elif operator == 'not':
+            if not self.expr.type.is_boolean():
+                scanner.syntax_error("Must be boolean",
+                                     self.expr.lexpos, self.expr.lineno,
+                                     self.expr.filename)
+            self.type = Builtin_type("boolean")
+            if self.expr.immedate:
+                self.immediate = True
+                self.value = not self.expr.value
+        else:
+            raise AssertionError(f"Unknown operator {self.operator}")
 
 
 class Binary_expr(Expr):
+    operator_map = {  # {operator: (result_type, arg_type, immediate_fn)}
+        '^': ('float', 'number', lambda x, y: x**y),
+        '*': ('numeric', 'number', lambda x, y: x * y),
+        '/': ('float', 'number', lambda x, y: x / y),
+        '//': ('integer', 'integer', lambda x, y: x // y),
+        '%': ('integer', 'integer', lambda x, y: x % y),
+        '+': ('numeric', 'number', lambda x, y: x + y),
+        '-': ('numeric', 'number', lambda x, y: x - y),
+        '<': ('boolean', 'number or string', lambda x, y: x < y),
+        '<=': ('boolean', 'number or string', lambda x, y: x <= y),
+        '<~=': ('boolean', 'float', lambda x, y: x < y or aeq(x, y)),
+        '>': ('boolean', 'number or string', lambda x, y: x > y),
+        '>=': ('boolean', 'number or string', lambda x, y: x >= y),
+        '>~=': ('boolean', 'float', lambda x, y: x > y or aeq(x, y)),
+        '==': ('boolean', 'number or string', lambda x, y: x == y),
+        '~=': ('boolean', 'float', lambda x, y: aeq(x, y)),
+        '!=': ('boolean', 'number or string', lambda x, y: x != y),
+        '<>': ('boolean', 'number or string', lambda x, y: x != y),
+        '!~=': ('boolean', 'float', lambda x, y: not aeq(x, y)),
+        '<~>': ('boolean', 'float', lambda x, y: not aeq(x, y)),
+    }
+
     def __init__(self, expr1, operator, expr2):
+        Expr.__init__(self, expr1.lexpos, expr1.lineno)
         self.expr1 = expr1
         self.operator = operator
         self.expr2 = expr2
@@ -1053,42 +1291,121 @@ class Binary_expr(Expr):
     def __repr__(self):
         return f"<Binary_expr {self.expr1} {self.operator} {self.expr2}>"
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        super().prepare_step(opmode, module, last_label, last_fn_subr)
-        self.expr1.prepare_step(opmode, module, last_label, last_fn_subr)
-        self.expr2.prepare_step(opmode, module, last_label, last_fn_subr)
-        # FIX: type check and self.type has to be done for each instance...
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        self.expr1.prepare_step(module, last_label, last_fn_subr)
+        self.expr2.prepare_step(module, last_label, last_fn_subr)
+
+        result_type, arg_type, immed_fn = self.operator_map[self.operator]
+
+        if not isinstance(self.expr1.type, Builtin_type):
+            scanner.syntax_error(
+              f"Expected {arg_type} type, got {self.expr1.type}",
+              self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
+        t1 = self.expr1.type
+        if not isinstance(self.expr2.type, Builtin_type):
+            scanner.syntax_error(
+              f"Expected {arg_type} type, got {self.expr2.type}",
+              self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
+        t2 = self.expr2.type
+        if arg_type == 'integer':
+            if t1.name != 'integer':
+                scanner.syntax_error(f"Expected {arg_type} type",
+                                     self.expr1.lexpos, self.expr1.lineno,
+                                     self.expr1.filename)
+            if t2.name != 'integer':
+                scanner.syntax_error(f"Expected {arg_type} type",
+                                     self.expr2.lexpos, self.expr2.lineno,
+                                     self.expr2.filename)
+        elif arg_type == 'float':    # at least one has to be float
+            if not t1.is_numeric():
+                scanner.syntax_error("Expected number type",
+                                     self.expr1.lexpos, self.expr1.lineno,
+                                     self.expr1.filename)
+            if not t2.is_numeric():
+                scanner.syntax_error("Expected number type",
+                                     self.expr2.lexpos, self.expr2.lineno,
+                                     self.expr2.filename)
+            if t1.name != 'float' and t2.name != 'float':
+                scanner.syntax_error(f"Expected {arg_type} type",
+                                     self.expr1.lexpos, self.expr1.lineno,
+                                     self.expr1.filename)
+        elif arg_type == 'number':
+            if not t1.is_numeric():
+                scanner.syntax_error("Expected number type",
+                                     self.expr1.lexpos, self.expr1.lineno,
+                                     self.expr1.filename)
+            if not t2.is_numeric():
+                scanner.syntax_error("Expected number type",
+                                     self.expr2.lexpos, self.expr2.lineno,
+                                     self.expr2.filename)
+        elif arg_type == 'number or string':
+            if not t1.is_numeric() and t1.name != 'string':
+                scanner.syntax_error(f"Expected {arg_type} type, got {t1.name}",
+                                     self.expr1.lexpos, self.expr1.lineno,
+                                     self.expr1.filename)
+            if not t2.is_numeric() and t2.name != 'string':
+                scanner.syntax_error(f"Expected {arg_type} type, got {t2.name}",
+                                     self.expr2.lexpos, self.expr2.lineno,
+                                     self.expr2.filename)
+            if t1.is_numeric() and not t2.is_numeric() or \
+               t1.name == 'string' and t2.name != 'string':
+                scanner.syntax_error(
+                  f"{self.operator!r}: expression types don't match",
+                  self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
+        else:
+            raise AssertionError(
+                    f"Unknown arg_type: {arg_type} for {self.operator}")
+        if result_type == 'numeric':
+            self.type = \
+              Builtin_type('integer'
+                           if t1.name == 'integer' and t2.name == 'integer'
+                           else 'float')
+        else:
+            self.type = Builtin_type(result_type)
+        if self.expr1.immediate and self.expr2.immediate:
+            self.immediate = True
+            self.value = immed_fn(self.expr1.value, self.expr2.value)
 
 
 class Return_label(Expr):
     def __init__(self, lexpos, lineno, label=None):
         #print("Return_label", lexpos, lineno, label)
-        self.lexpos = lexpos
-        self.lineno = lineno
-        self.filename = scanner.lexer.filename
+        Expr.__init__(self, lexpos, lineno)
         self.label = label      # IDENT
 
-    def prepare_step(self, opmode, module, last_label, last_fn_subr):
-        super().prepare_step(opmode, module, last_label, last_fn_subr)
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
         if self.label is None:
-            self.label = last_label
-        # FIX: lookup self.label
+            if last_fn_subr is None:
+                scanner.syntax_error("Must follow a SUBROUTINE or FUNCTION",
+                                     self.lexpos, self.lineno, self.filename)
+            self.label = last_fn_subr
+        else:
+            self.label = module.lookup(self.label)
+            if not isinstance(self.label, Subroutine):
+                scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
+                                     self.label.lexpos, self.label.lineno,
+                                     self.label.filename)
+        self.type = self.label.type.return_label_type
 
 
 def indent_str(indent):
     return " "*indent
 
 
-def lookup(ident, module, opmode):
-    #print("lookup", ident, module, opmode)
+def lookup(ident, module):
+    #print("lookup", ident, module)
     obj = module.lookup(ident, error_not_found=False)
     if obj is not None:
         return obj
-    obj = opmode.lookup(ident, error_not_found=False)
+    obj = Opmode_module.lookup(ident, error_not_found=False)
     if obj is not None:
         return obj
-    obj = opmode.modules_seen['builtins'].lookup(ident, error_not_found=False)
+    obj = Opmode_module.modules_seen['builtins'] \
+                       .lookup(ident, error_not_found=False)
     if obj is not None:
         return obj
     scanner.syntax_error("Not found",
                          ident.lexpos, ident.lineno, ident.filename)
+

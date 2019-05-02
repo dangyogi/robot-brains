@@ -6,8 +6,8 @@ Descriptors:
   - has:
     - char *name
     - char type                     // 'S', 'F' or 'L'
-    - int num_param_blocks
     - module instance *module
+    - int num_param_blocks
     * param_block_descriptors *param_block_decriptors
     * unsigned long params_passed   // one bit per var
       - has param_passed and kw_passed bits
@@ -41,6 +41,7 @@ Descriptors:
   - has:
     - char *name                    // full path, e.g., "a.b.c"
     - char *filename
+    - label_descriptor *module_params
     - unsigned long vars_set        // one bit per var
       - init to 0 outside of main
     - unsigned long lineno

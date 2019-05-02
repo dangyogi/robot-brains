@@ -118,6 +118,7 @@ expr : primary
      | expr '^' expr
      | expr '*' expr
      | expr '/' expr
+     | expr '//' expr
      | expr '%' expr
      | expr '+' expr
      | expr '-' expr

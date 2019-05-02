@@ -31,7 +31,7 @@ precedence = (   # lowest to highest
     ('nonassoc', '<', 'LEQ', 'LAEQ', '>', 'GEQ', 'GAEQ', 'AEQ', 'NAEQ'),
     ('left', '+', '-'),
     ('right', '/'),
-    ('left', '*', '%'),
+    ('left', '*', '%', 'INTEGER_DIVIDE'),
     ('right', 'UMINUS'),
     ('right', '^'),
     ('left', '.'),
@@ -264,7 +264,7 @@ def p_primary_literal(p):
             | INTEGER_LIT
             | BOOLEAN_LIT
     """
-    p[0] = Literal(p[1])
+    p[0] = Literal(p.lexpos(1), p.lineno(1), p[1])
 
 
 def p_return_label1(p):
@@ -298,32 +298,32 @@ def p_primary_subscript(p):
 
 def p_primary_got_keyword1(p):
     "primary : GOT KEYWORD"
-    p[0] = Got_keyword(p[2])
+    p[0] = Got_keyword(p.lexpos(1), p.lineno(1), p[2])
 
 
 def p_primary_got_keyword2(p):
     "primary : GOT IDENT '.' KEYWORD"
-    p[0] = Got_keyword(p[4], p[2])
+    p[0] = Got_keyword(p.lexpos(1), p.lineno(1), p[4], p[2])
 
 
 def p_primary_got_keyword3(p):
     "primary : GOT MODULE '.' KEYWORD"
-    p[0] = Got_keyword(p[4], module=True)
+    p[0] = Got_keyword(p.lexpos(1), p.lineno(1), p[4], module=True)
 
 
 def p_primary_got_param1(p):
     "primary : GOT IDENT"
-    p[0] = Got_param(p[2])
+    p[0] = Got_param(p.lexpos(1), p.lineno(1), p[2])
 
 
 def p_primary_got_param2(p):
     "primary : GOT IDENT '.' IDENT"
-    p[0] = Got_param(p[4], p[2])
+    p[0] = Got_param(p.lexpos(1), p.lineno(1), p[4], p[2])
 
 
 def p_primary_got_param3(p):
     "primary : GOT MODULE '.' IDENT"
-    p[0] = Got_param(p[4], module=True)
+    p[0] = Got_param(p.lexpos(1), p.lineno(1), p[4], module=True)
 
 
 def p_unary_expr(p):
@@ -331,7 +331,7 @@ def p_unary_expr(p):
     expr : NOT expr
          | '-' expr               %prec UMINUS
     """
-    p[0] = Unary_expr(p[1], p[2])
+    p[0] = Unary_expr(p.lexpos(1), p.lineno(1), p[1], p[2])
 
 
 def p_binary_expr(p):
@@ -339,6 +339,7 @@ def p_binary_expr(p):
     expr : expr '^' expr
          | expr '*' expr
          | expr '/' expr
+         | expr INTEGER_DIVIDE expr
          | expr '%' expr
          | expr '+' expr
          | expr '-' expr
@@ -494,7 +495,7 @@ def p_primary(p):
     '''
     simple_primary : '{' primary arguments '}'
     '''
-    p[0] = Call_fn(p[2], p[3])
+    p[0] = Call_fn(p[2], p[3][0], p[3][1])
 
 
 def p_make_opmode(p):
@@ -539,7 +540,7 @@ def p_use1(p):
     '''
     use : USE IDENT arguments newlines
     '''
-    Use(p[2], p[2], p[3])
+    Use(p[2], p[2], p[3][0], p[3][1])
     name = p[2].value
     if name not in Modules_seen:
         #print("Use adding", name)
@@ -550,7 +551,7 @@ def p_use2(p):
     '''
     use : USE IDENT AS IDENT arguments newlines
     '''
-    Use(p[4], p[2], p[5])
+    Use(p[4], p[2], p[5][0], p[5][1])
     name = p[2].value
     if name not in Modules_seen:
         #print("Use adding", name)
@@ -746,6 +747,14 @@ if __name__ == "__main__":
         print("dump:")
         print()
         top_entity.dump(sys.stdout)
+
+    print()
+    print("setup:")
+    print()
+    try:
+        top_entity.setup()
+    except SyntaxError:
+        sys.exit(1)
 
     print()
     print("code:")

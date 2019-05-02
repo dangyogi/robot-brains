@@ -85,6 +85,7 @@ tokens = (
     'GEQ',
     'GOT',
     'IDENT',
+    'INTEGER_DIVIDE',
     'INTEGER_LIT',
     'KEYWORD',
     'LAEQ',
@@ -340,6 +341,11 @@ def t_DLT_MAP(t):
     t.value = Token(t, t.value[1:-1].rstrip(), lexpos=t.lexpos + 1)
     if t.value:
         return t
+
+
+def t_INTEGER_DIVIDE(t):
+    r'//'
+    return t
 
 
 def t_EQ(t):
