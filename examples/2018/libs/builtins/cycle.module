@@ -33,7 +33,7 @@ subroutine run
 
 subroutine run_all name$
     var next_subr is subr_t
-    var p_config is p_config_t
+    var p_config is p_config_s_t
 
     set i_current to: 0
     set i_next to: 1

@@ -6,16 +6,18 @@ module
 
 use cycle
 
+type subr_t is subroutine
+
 type label_t is label
 type label_l_t is label taking label_t
+type label_s_t is label taking subr_t
 
-type p_config_t is subroutine taking ?c_yield: label_l_t ?c_done: label_t
-                                  -> ?c_config: c_config_t
+type p_config_s_t is subroutine taking ?c_yield: label_s_t ?c_done: label_t
+                                    -> ?c_config: c_config_t
 
 type c_config_t is subroutine taking ?p_next: label_t ?p_done: subr_t
-                                  -> ?p_config: p_config_t
+                                  -> ?p_config: p_config_s_t
 
-type subr_t is subroutine
 
 # FIX: temporary
 var isAlive? is boolean
@@ -27,7 +29,7 @@ native subroutine abort message$
     `exit(1);`
 
 
-function get_subroutines_by_name name$ returning p_config_t
+function get_subroutines_by_name name$ returning p_config_s_t
   goto return_label p_config
 
   subroutine p_config ?c_yield: c_yield ?c_done: c_done ?c_config: c_config
@@ -67,7 +69,7 @@ function get_subroutines_by_name name$ returning p_config_t
     ======================================================================
     | X  | set i to: ilabel_index
     |    | ilabel_index += 1
-    |    | c_yield {get_label imodule_index i}
+    |    | goto c_yield {get_label imodule_index i}
     |  X | ilabel_index += 1
     |    | goto next_routine
     ======================================================================

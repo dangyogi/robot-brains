@@ -809,7 +809,10 @@ class Statement(Step):
         self.args = args
 
     def is_final(self):
-        return self.args[0] in ('goto', 'return')
+        return self.args[0] in ('goto', 'return', 'continue')
+
+    def is_continue(self):
+        return self.args[0] == 'continue'
 
     def dump_details(self, f):
         super().dump_details(f)
@@ -1016,6 +1019,12 @@ class DLT_MAP(Step):
     def __init__(self, map):
         self.map = map
 
+    def is_final(self):
+        return False
+
+    def is_continue(self):
+        return False
+
     def assign_column_numbers(self, seen):
         r'''Creates self.column_numbers.
 
@@ -1058,11 +1067,16 @@ class Actions(Step):
         self.actions = actions
         seen = set()
         self.final = True
-        for action in actions:
+        for action, next_action in pairwise(actions):
             if isinstance(action, DLT_MAP):
                 action.assign_column_numbers(seen)
-            if isinstance(action, Statement) and action.args[0] == 'continue':
+            elif action.is_continue():
                 self.final = False
+            if next_action is not None and not isinstance(next_action, DLT_MAP):
+                if action.is_final():
+                    scanner.syntax_error("Statement must fall-through",
+                                         action.lexpos, action.lineno,
+                                         action.filename)
         if not actions[-1].is_final():
             self.final = False
 
@@ -1109,6 +1123,9 @@ class DLT(Step):
         self.conditions = conditions    # Conditions instance
         self.actions = actions          # Actions instance
         conditions.sync_actions(actions)
+
+    def is_continue(self):
+        return False
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
