@@ -14,7 +14,7 @@ from symtable import (
     Use, Typedef, Label, Return_label, DLT, Conditions, DLT_MAP, Actions,
     Variable, Required_parameter, Optional_parameter,
     Statement, Call_statement, Opeq_statement, Done_statement,
-    Literal, Variable_ref, Dot, Subscript, Got_keyword, Got_param, Call_fn,
+    Literal, Reference, Dot, Subscript, Got_keyword, Got_param, Call_fn,
     Unary_expr, Binary_expr, Builtin_type, Typename_type, Label_type,
 )
 
@@ -32,7 +32,7 @@ precedence = (   # lowest to highest
     ('left', '+', '-'),
     ('right', '/'),
     ('left', '*', '%', 'INTEGER_DIVIDE'),
-    ('right', 'UMINUS'),
+    ('right', 'UMINUS', 'ABS'),
     ('right', '^'),
     ('left', '.'),
 )
@@ -283,7 +283,7 @@ def p_return_label2(p):
 
 def p_primary_ident(p):
     "simple_primary : IDENT"
-    p[0] = Variable_ref(p[1])
+    p[0] = Reference(p[1])
 
 
 def p_primary_dot(p):
@@ -328,7 +328,8 @@ def p_primary_got_param3(p):
 
 def p_unary_expr(p):
     """
-    expr : NOT expr
+    expr : ABS expr
+         | NOT expr
          | '-' expr               %prec UMINUS
     """
     p[0] = Unary_expr(p.lexpos(1), p.lineno(1), p[1], p[2])
@@ -426,14 +427,14 @@ def p_simple_statement1(p):
     simple_statement : CONTINUE
                      | GOTO primary pos_arguments
     """
-    p[0] = Statement(p.lineno(1), *p[1:])
+    p[0] = Statement(p.lexpos(1), p.lineno(1), *p[1:])
 
 
 def p_simple_statement2(p):
     r"""
     simple_statement : SET extended_kws lvalue TO normal_kws primary
     """
-    p[0] = Statement(p.lineno(1), p[1], p[3], p[6])
+    p[0] = Statement(p.lexpos(1), p.lineno(1), p[1], p[3], p[6])
 
 
 def p_simple_statement3(p):
@@ -441,7 +442,7 @@ def p_simple_statement3(p):
     simple_statement : extended_kws RETURN primarys from_opt normal_kws
                      | extended_kws RETURN primarys from_opt TO primary normal_kws
     """
-    p[0] = Statement(p.lineno(2), p[2], *p[3:-1])
+    p[0] = Statement(p.lexpos(2), p.lineno(2), p[2], *p[3:-1])
 
 
 def p_extended_kws(p):
@@ -459,28 +460,28 @@ def p_simple_statement4(p):
     simple_statement : primary arguments
                      | primary arguments RETURNING_TO primary
     """
-    p[0] = Call_statement(p.lineno(1), *p[1:])
+    p[0] = Call_statement(p.lexpos(1), p.lineno(1), *p[1:])
 
 
 def p_simple_statement5(p):
     r"""
     simple_statement : primary OPEQ primary
     """
-    p[0] = Opeq_statement(p.lineno(1), p[1], p[2], p[3])
+    p[0] = Opeq_statement(p.lexpos(1), p.lineno(1), p[1], p[2], p[3])
 
 
 def p_simple_statement6(p):
     r"""
     simple_statement : extended_kws DONE normal_kws
     """
-    p[0] = Done_statement(p.lineno(2))
+    p[0] = Done_statement(p.lexpos(2), p.lineno(2))
 
 
 def p_simple_statement7(p):
     r"""
     simple_statement : extended_kws DONE WITH IDENT normal_kws
     """
-    p[0] = Done_statement(p.lineno(2), p[4])
+    p[0] = Done_statement(p.lexpos(2), p.lineno(2), p[4])
 
 
 def p_file(p):

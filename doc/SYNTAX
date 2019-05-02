@@ -114,6 +114,7 @@ lvalue : IDENT
 
 expr : primary
      | NOT expr
+     | ABS expr
      | '-' expr
      | expr '^' expr
      | expr '*' expr

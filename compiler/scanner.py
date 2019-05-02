@@ -43,6 +43,7 @@ class Token:
 
 
 reserved = frozenset((
+    'ABS',
     'AS',
     'AUTONOMOUS',
     'BOOLEAN',

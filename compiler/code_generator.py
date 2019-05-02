@@ -1,4 +1,4 @@
-# C_gen.py
+# code_generator.py
 
 import sys
 import os.path
@@ -9,7 +9,7 @@ import symtable
 from scanner import Token, syntax_error
 
 
-C_UNSIGNED_LONG_BITS = 64
+NUM_FLAG_BITS = 64
 Num_label_bits = 1              # running bit
 Max_bits_used = 0
 
@@ -20,100 +20,54 @@ Label_indent = 2
 Statement_indent = 4
 
 
-Precedence = (  # highest to lowest
-    ('left', '.', '(', '[', '->'),
-    ('right', 'UMINUS', '++', '--', '!', '~', '&', '&&', 'sizeof'),
-    ('left', '*', '/', '%'),
-    ('left', '+', '-'),
-    ('left', '<<', '>>'),
-    ('left', '<', '<=', '>', '>='),
-    ('left', '==', '!='),
-    ('left', '&'),
-    ('left', '^'),
-    ('left', '|'),
-    ('left', '&&'),
-    ('left', '||'),
-    ('right', '?:'),
-    ('right', '=', '*=', '/=', '%=', '-=', '&=', '^=', '|=', '<<=', '>>='),
-    ('left', ','),
-)
+
+def parse_precedence(precedence):
+    return {op: (i, assoc)
+            for i, (assoc, *opers) in enumerate(reversed(precedence), 1)
+            for op in opers
+           }
 
 
-Reserved_words = frozenset((
-    'auto',
-    'break',
-    'case',
-    'char',
-    'const',
-    'continue',
-    'default',
-    'do',
-    'double',
-    'else',
-    'enum',
-    'extern',
-    'float',
-    'for',
-    'goto',
-    'if',
-    'int',
-    'long',
-    'register',
-    'return',
-    'short',
-    'signed',
-    'sizeof',
-    'static',
-    'struct',
-    'switch',
-    'typedef',
-    'union',
-    'unsigned',
-    'void',
-    'volatile',
-    'while',
-))
+# {operator: (precedence_level, assoc)}
+Precedence_lookup = parse_precedence(Precedence)
 
 
-expr_unary = {
-    'ABS': gen_abs,
-    'NOT': partial(unary, '!', '!{}'),
-    '-': partial(unary, 'UMINUS', '-{}'),
-}
+def wrap(expr, precedence, side):
+    if expr[2] > precedence or expr[2] == precedence and expr[3] == side:
+        return expr[1]
+    return f"({expr[1]})"
 
 
-expr_binary = {
-    '.': partial(binary, '.', '{}.{}'),
-    '^': partial(binary, ',', 'pow({}, {})', result_op='('),
-    '*': partial(binary, '*', '{} * {}'),
-    '/': partial(binary, '/', '{} / {}'),
-    '//': partial(binary, '/', '{} / {}'),
-    '%': partial(binary, '%', '{} % {}'),
-    '+': partial(binary, '+', '{} + {}'),
-    '-': partial(binary, '-', '{} - {}'),
-    '<': partial(binary, '<', '{} < {}'),
-    '<=': partial(binary, '<=', '{} <= {}'),
-    '<~=': partial(binary, '-', '{} - {} < 1e-6', result_op='<'),
-    '>': partial(binary, '>', '{} > {}'),
-    '>=': partial(binary, '>=', '{} >= {}'),
-    '>~=': partial(binary, '-', '{} - {} > -1e-6', result_op='>'),
-    '==': partial(binary, '==', '{} == {}'),
-    '~=': partial(binary, '-', 'fabs({} - {}) < 1e-6', result_op='<'),
-    '!=': partial(binary, '!=', '{} != {}'),
-    '<>': partial(binary, '!=', '{} != {}'),
-    '!~=': partial(binary, '-', 'fabs({} - {}) >= 1e-6', result_op='>='),
-    '<~>': partial(binary, '-', 'fabs({} - {}) >= 1e-6', result_op='>='),
-    '[': subscript,
-}
+def gen_abs(expr):
+    if expr.type.is_integer():
+        return f"abs({expr})"
+    return f"fabs({expr})"
 
 
-types = {
-    "float": "double",
-    "integer": "long",
-    "boolean": "char",
-    "string": "char *",
-    "module": "struct module_instance_s",
-}
+def unary(op, format, expr): 
+    precedence, assoc = Precedence_lookup[op]
+    return (expr[0],
+            format.format(wrap(expr, precedence, 'right')),
+            precedence, assoc)
+
+
+def binary(op, format, left_expr, right_expr, *, result_op=None): 
+    precedence, assoc = Precedence_lookup[op]
+    if result_op is None:
+        result_prec, result_assoc = precedence, assoc
+    else:
+        result_prec, result_assoc = Precedence_lookup(result_op)
+    return (left_expr[0] + right_expr[0],
+            format.format(wrap(left_expr, precedence, 'left'),
+                          wrap(right_expr, precedence, 'right')),
+            result_precedence, result_assoc)
+
+
+def subscript(left, right):
+    precedence, assoc = Precedence_lookup['[']
+    return (f"subscript({wrap(left, precedence, assoc)}, {right[0]}, "
+              f"{left.dim()})",
+            precedence, assoc)
 
 
 def gen_program(opmode):
@@ -143,7 +97,7 @@ def gen_program(opmode):
         print("assign_names ....")
         do(assign_names)
         print("Max_bits_used", Max_bits_used, Max_bits_obj)
-        if Max_bits_used >= C_UNSIGNED_LONG_BITS:
+        if Max_bits_used >= NUM_FLAG_BITS:
             print("Exceeded number of available label flags bits in",
                   Max_bits_obj.name.value,
                   file=sys.stderr)

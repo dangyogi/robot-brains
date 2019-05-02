@@ -3,11 +3,19 @@
 from collections import OrderedDict
 from copy import deepcopy
 from math import isclose
+from itertools import tee, zip_longest
 
 import scanner
 
 
 Last_parameter_obj = None
+
+
+def pairwise(iterable, fillvalue=None):
+    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
+    a, b = tee(iterable)
+    next(b, None)
+    return zip_longest(a, b, fillvalue=fillvalue)
 
 
 def aeq(x, y):
@@ -76,18 +84,6 @@ class Symtable(Hook_base):
         return self.run_hook("prepare", module)
 
     def do_prepare(self, module):
-        r'''Override this in the subclasses.
-        '''
-        pass
-
-    def prepare_step(self, module, last_label, last_fn_subr):
-        r'''Called once per instance.
-        '''
-        self.do_prepare_step(module, last_label, last_fn_subr)
-        return self.run_hook("prepare_step", module, last_label,
-                             last_fn_subr)
-
-    def do_prepare_step(self, module, last_label, last_fn_subr):
         r'''Override this in the subclasses.
         '''
         pass
@@ -247,6 +243,21 @@ class Type(Symtable):
     def do_prepare(self, module):
         super().do_prepare(module)
 
+    def is_numeric(self):
+        return False
+
+    def is_integer(self):
+        return False
+
+    def is_float(self):
+        return False
+
+    def is_string(self):
+        return False
+
+    def is_boolean(self):
+        return False
+
 
 class Builtin_type(Type):
     def __init__(self, name):
@@ -257,6 +268,18 @@ class Builtin_type(Type):
 
     def is_numeric(self):
         return self.name in ('float', 'integer')
+
+    def is_integer(self):
+        return self.name == 'integer'
+
+    def is_float(self):
+        return self.name == 'float'
+
+    def is_string(self):
+        return self.name == 'string'
+
+    def is_boolean(self):
+        return self.name == 'boolean'
 
 
 class Typename_type(Type):
@@ -277,6 +300,21 @@ class Typename_type(Type):
                                    f"not a {self.typedef.__class__.__name__}",
                                  self.ident.lexpos, self.ident.lineno,
                                  self.ident.filename)
+
+    def is_numeric(self):
+        return self.typedef.type.is_numeric()
+
+    def is_integer(self):
+        return self.typedef.type.is_integer()
+
+    def is_float(self):
+        return self.typedef.type.is_float()
+
+    def is_string(self):
+        return self.typedef.type.is_string()
+
+    def is_boolean(self):
+        return self.typedef.type.is_boolean()
 
 
 class Label_type(Type):
@@ -401,6 +439,7 @@ class Namespace(Symtable):
         self.names = OrderedDict()
         #print(f"scanner.Namespaces.append({ident})")
         scanner.Namespaces.append(self)
+        self.prepared = False
 
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.name}>"
@@ -440,7 +479,8 @@ class Namespace(Symtable):
     def make_variable(self, ident):
         lname = ident.value.lower()
         if lname not in self.names:
-            entity = self.names[lname] = Variable(ident)
+            # Variable automatically places itself in self.names
+            entity = Variable(ident)
         else:
             entity = self.names[lname]
             if not isinstance(entity, Variable):
@@ -453,6 +493,15 @@ class Namespace(Symtable):
     def dump_contents(self, f, indent):
         for entity in self.names.values():
             entity.dump(f, indent)
+
+    def prepare_entities(self):
+        self.do_prepare_entities()
+        self.run_hook("prepare_entities")
+
+    def do_prepare_entities(self):
+        self.prepared = True
+        for obj in self.names.values():
+            obj.prepare(self)
 
 
 class Opmode(Namespace):
@@ -511,8 +560,7 @@ class Opmode(Namespace):
 
     def do_prepare_module(self):
         #print("Opmode.do_prepare_module", self.__class__.__name__, self.name)
-        for obj in self.names.values():
-            obj.prepare(self)
+        self.prepare_entities()
         self.prepare(self)   # declared in With_parameters
         for use in self.filter(Use):
             #print(self.name, "link_uses doing", use)
@@ -630,17 +678,41 @@ class Module(With_parameters, Opmode):
         super().do_prepare_module()
         last_label = None
         last_fn_subr = None
-        for step in self.steps:
+        for step, next_step in pairwise(self.steps):
             if isinstance(step, Subroutine):
                 last_fn_subr = step
-            if isinstance(step, Label) and not step.hidden:
+                last_label = step
+            elif isinstance(step, Label) and not step.hidden:
                 last_label = step
             assert last_label is not None
             step.prepare_step(self, last_label, last_fn_subr)
-            # FIX: Add check for final steps at end of blocks, and not before
+            if next_step is None or isinstance(next_step, Label):
+                if not step.is_final():
+                    scanner.syntax_error("Statement must not fall-through",
+                                         step.lexpos, step.lineno,
+                                         step.filename)
+            else:
+                if step.is_final():
+                    scanner.syntax_error("Statement must fall-through",
+                                         step.lexpos, step.lineno,
+                                         step.filename)
 
 
-class Label(With_parameters, Entity):
+class Step(Symtable):
+    def prepare_step(self, module, last_label, last_fn_subr):
+        r'''Called once per instance.
+        '''
+        self.do_prepare_step(module, last_label, last_fn_subr)
+        return self.run_hook("prepare_step", module, last_label,
+                             last_fn_subr)
+
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        r'''Override this in the subclasses.
+        '''
+        pass
+
+
+class Label(With_parameters, Step, Entity):
     immediate = True
 
     def __init__(self, ident, hidden=False):
@@ -661,6 +733,9 @@ class Label(With_parameters, Entity):
     @property
     def value(self):
         return self
+
+    def is_final(self):
+        return False
 
 
 class Subroutine(Label):
@@ -713,7 +788,7 @@ class Native_function(Native_subroutine):
         return self.return_type,
 
 
-class Statement(Symtable):
+class Statement(Step):
     arguments = {
         'continue': (),
         'set': ('lvalue', 'expr'),
@@ -727,9 +802,14 @@ class Statement(Symtable):
         'return': ('return {}',),
     }
 
-    def __init__(self, lineno, *args):
+    def __init__(self, lexpos, lineno, *args):
+        self.lexpos = lexpos
         self.lineno = lineno
+        self.filename = scanner.filename()
         self.args = args
+
+    def is_final(self):
+        return self.args[0] in ('goto', 'return')
 
     def dump_details(self, f):
         super().dump_details(f)
@@ -739,7 +819,7 @@ class Statement(Symtable):
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         def _prepare(obj):
-            if isinstance(obj, Symtable):
+            if isinstance(obj, Step):
                 obj.prepare_step(module, last_label, last_fn_subr)
             elif isinstance(obj, (list, tuple)):
                 for x in obj:
@@ -793,20 +873,23 @@ class Statement(Symtable):
 
 class Call_statement(Statement):
     # primary arguments [RETURNING_TO primary]
-    pass
+    def is_final(self):
+        return len(self.args) > 2
 
 
 class Opeq_statement(Statement):
     # primary OPEQ primary
-    pass
+    def is_final(self):
+        return False
 
 
 class Done_statement(Statement):
     # done [with: label]
-    pass
+    def is_final(self):
+        return False
 
 
-class Conditions(Symtable):
+class Conditions(Step):
     r'''DLT conditions section.
 
     self.exprs is condition expressions in order from MSB to LSB in the mask.
@@ -832,19 +915,22 @@ class Conditions(Symtable):
                 scanner.syntax_error("Condition flags don't start in the same "
                                      "column as previous condition",
                                      dlt_mask.lexpos + this_offset,
-                                     dlt_mask.lineno)
+                                     dlt_mask.lineno,
+                                     dlt_mask.filename)
             dlt_mask.value = dlt_mask.value.lstrip()
             dlt_mask.lexpos += this_offset
             if len(dlt_mask.value.strip()) != self.num_columns:
                 scanner.syntax_error("Must have same number of condition flags "
                                      "as previous condition",
-                                     dlt_mask.lexpos, dlt_mask.lineno)
+                                     dlt_mask.lexpos, dlt_mask.lineno,
+                                     dlt_mask.filename)
             self.exprs.append(expr)
             for i, flag in enumerate(dlt_mask.value.strip()):
                 if flag not in '-yYnN':
                     scanner.syntax_error("Illegal condition flag, "
                                          "expected 'y', 'n', or '-'",
-                                         dlt_mask.lexpos + i, dlt_mask.lineno)
+                                         dlt_mask.lexpos + i, dlt_mask.lineno,
+                                         dlt_mask.filename)
                 columns[i].append(flag.upper())
 
         #print("exprs", self.exprs, "offset", self.offset,
@@ -866,7 +952,8 @@ class Conditions(Symtable):
                 if mask in seen:
                     scanner.syntax_error("Duplicate condition flags",
                                          self.dlt_mask.lexpos + i,
-                                         self.dlt_mask.lineno)
+                                         self.dlt_mask.lineno,
+                                         self.dlt_mask.filename)
                 else:
                     seen.add(mask)
 
@@ -879,7 +966,8 @@ class Conditions(Symtable):
             scanner.syntax_error("Missing condition flags (top to bottom): "
                                    + ', '.join(unseen),
                                  self.dlt_mask.lexpos + self.num_columns,
-                                 self.dlt_mask.lineno)
+                                 self.dlt_mask.lineno,
+                                 self.dlt_mask.filename)
 
     def gen_masks(self, flags, i=None):
         if not flags: return [0]
@@ -901,12 +989,16 @@ class Conditions(Symtable):
         if missing_columns:
             scanner.syntax_error("Missing action for this column",
                                  self.dlt_mask.lexpos + missing_columns[0],
-                                 self.dlt_mask.lineno)
+                                 self.dlt_mask.lineno,
+                                 self.dlt_mask.filename)
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         for expr in self.exprs:
             expr.prepare_step(module, last_label, last_fn_subr)
+            if not expr.is_boolean():
+                scanner.syntax_error("Must be boolean expression",
+                                     expr.lexpos, expr.lineno, expr.filename)
 
     def gen_code(self, f, indent=0):
         prefix = indent_str(indent)
@@ -918,7 +1010,7 @@ class Conditions(Symtable):
         print(f"{prefix}switch (dlt_mask)", "{", file=f)
 
 
-class DLT_MAP(Symtable):
+class DLT_MAP(Step):
     r'''self.map is a Token whose value is the "X X..." map.
     '''
     def __init__(self, map):
@@ -959,18 +1051,23 @@ class DLT_MAP(Symtable):
         super().dump_details(f)
         print(f" {self.map.value}", end='', file=f)
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
 
-
-class Actions(Symtable):
+class Actions(Step):
     def __init__(self, actions):
         r'self.actions is ((dlt_map | statement) ...)'
         self.actions = actions
         seen = set()
+        self.final = True
         for action in actions:
             if isinstance(action, DLT_MAP):
                 action.assign_column_numbers(seen)
+            if isinstance(action, Statement) and action.args[0] == 'continue':
+                self.final = False
+        if not actions[-1].is_final():
+            self.final = False
+
+    def is_final(self):
+        return self.final
 
     def apply_offset(self, offset, num_columns):
         r'''Subtracts offset from each column_number in self.actions.
@@ -1007,7 +1104,7 @@ class Actions(Symtable):
         print("}", file=f)
 
 
-class DLT(Symtable):
+class DLT(Step):
     def __init__(self, conditions, actions):
         self.conditions = conditions    # Conditions instance
         self.actions = actions          # Actions instance
@@ -1018,23 +1115,33 @@ class DLT(Symtable):
         self.conditions.prepare_step(module, last_label, last_fn_subr)
         self.actions.prepare_step(module, last_label, last_fn_subr)
 
+    def is_final(self):
+        return self.actions.is_final()
 
-class Expr(Symtable):
+
+class Expr(Step):
     immediate = False   # True iff value known at compile time
 
     def __init__(self, lexpos, lineno):
         self.lexpos = lexpos
         self.lineno = lineno
         self.filename = scanner.filename()
-
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
+        self.prelude_steps = []
 
     def is_numeric(self):
-        return False
+        return self.type.is_numeric()
+
+    def is_integer(self):
+        return self.type.is_integer()
+
+    def is_float(self):
+        return self.type.is_float()
+
+    def is_string(self):
+        return self.type.is_string()
 
     def is_boolean(self):
-        return False
+        return self.type.is_boolean()
 
 
 class Literal(Expr):
@@ -1055,20 +1162,14 @@ class Literal(Expr):
     def __repr__(self):
         return f"<Literal {self.value!r}>"
 
-    def is_numeric(self):
-        return self.type in ('integer', 'float')
 
-    def is_boolean(self):
-        return self.type == 'boolean'
-
-
-class Variable_ref(Expr):
+class Reference(Expr):
     def __init__(self, ident):
         Expr.__init__(self, ident.lexpos, ident.lineno)
         self.ident = ident
 
     def __repr__(self):
-        return f"<Variable_ref {self.ident.value}>"
+        return f"<Reference {self.ident.value}>"
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
@@ -1076,7 +1177,7 @@ class Variable_ref(Expr):
         # These should be the same for all instances (since the type is
         # defined in the module and can't be passed in as a module parameter).
         self.referent = lookup(self.ident, module)
-        #print("Variable_ref", self.ident, "found", self.referent)
+        #print("Reference", self.ident, "found", self.referent)
         self.type = self.referent.type
 
 
@@ -1237,17 +1338,20 @@ class Unary_expr(Expr):
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         self.expr.prepare_step(module, last_label, last_fn_subr)
-        if operator == '-':
-            if not self.expr.type.is_numeric():
+        if self.operator in ('-', 'abs'):
+            if not self.expr.is_numeric():
                 scanner.syntax_error("Must be a numeric type",
                                      self.expr.lexpos, self.expr.lineno,
                                      self.expr.filename)
             self.type = self.expr.type
             if self.expr.immedate:
                 self.immediate = True
-                self.value = -self.expr.value
-        elif operator == 'not':
-            if not self.expr.type.is_boolean():
+                if self.operator == '-':
+                    self.value = -self.expr.value
+                else:
+                    self.value = abs(self.expr.value)
+        elif self.operator == 'not':
+            if not self.expr.is_boolean():
                 scanner.syntax_error("Must be boolean",
                                      self.expr.lexpos, self.expr.lineno,
                                      self.expr.filename)
@@ -1298,58 +1402,50 @@ class Binary_expr(Expr):
 
         result_type, arg_type, immed_fn = self.operator_map[self.operator]
 
-        if not isinstance(self.expr1.type, Builtin_type):
-            scanner.syntax_error(
-              f"Expected {arg_type} type, got {self.expr1.type}",
-              self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
-        t1 = self.expr1.type
-        if not isinstance(self.expr2.type, Builtin_type):
-            scanner.syntax_error(
-              f"Expected {arg_type} type, got {self.expr2.type}",
-              self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
-        t2 = self.expr2.type
         if arg_type == 'integer':
-            if t1.name != 'integer':
+            if not self.expr1.is_integer():
                 scanner.syntax_error(f"Expected {arg_type} type",
                                      self.expr1.lexpos, self.expr1.lineno,
                                      self.expr1.filename)
-            if t2.name != 'integer':
+            if not self.expr2.is_integer():
                 scanner.syntax_error(f"Expected {arg_type} type",
                                      self.expr2.lexpos, self.expr2.lineno,
                                      self.expr2.filename)
         elif arg_type == 'float':    # at least one has to be float
-            if not t1.is_numeric():
+            if not self.expr1.is_numeric():
                 scanner.syntax_error("Expected number type",
                                      self.expr1.lexpos, self.expr1.lineno,
                                      self.expr1.filename)
-            if not t2.is_numeric():
+            if not self.expr2.is_numeric():
                 scanner.syntax_error("Expected number type",
                                      self.expr2.lexpos, self.expr2.lineno,
                                      self.expr2.filename)
-            if t1.name != 'float' and t2.name != 'float':
+            if not self.expr1.is_float() and not self.expr2.is_float():
                 scanner.syntax_error(f"Expected {arg_type} type",
                                      self.expr1.lexpos, self.expr1.lineno,
                                      self.expr1.filename)
         elif arg_type == 'number':
-            if not t1.is_numeric():
+            if not self.expr1.is_numeric():
                 scanner.syntax_error("Expected number type",
                                      self.expr1.lexpos, self.expr1.lineno,
                                      self.expr1.filename)
-            if not t2.is_numeric():
+            if not self.expr2.is_numeric():
                 scanner.syntax_error("Expected number type",
                                      self.expr2.lexpos, self.expr2.lineno,
                                      self.expr2.filename)
         elif arg_type == 'number or string':
-            if not t1.is_numeric() and t1.name != 'string':
-                scanner.syntax_error(f"Expected {arg_type} type, got {t1.name}",
+            if not self.expr1.is_numeric() and not self.expr1.is_string():
+                scanner.syntax_error(f"Expected {arg_type} type, "
+                                       f"got {self.expr1.type}",
                                      self.expr1.lexpos, self.expr1.lineno,
                                      self.expr1.filename)
-            if not t2.is_numeric() and t2.name != 'string':
-                scanner.syntax_error(f"Expected {arg_type} type, got {t2.name}",
+            if not self.expr2.is_numeric() and not self.expr2.is_string():
+                scanner.syntax_error(f"Expected {arg_type} type, "
+                                       f"got {self.expr2.type}",
                                      self.expr2.lexpos, self.expr2.lineno,
                                      self.expr2.filename)
-            if t1.is_numeric() and not t2.is_numeric() or \
-               t1.name == 'string' and t2.name != 'string':
+            if self.expr1.is_numeric() and not self.expr2.is_numeric() or \
+               self.expr1.is_string() and not self.expr2.is_string():
                 scanner.syntax_error(
                   f"{self.operator!r}: expression types don't match",
                   self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
@@ -1359,7 +1455,8 @@ class Binary_expr(Expr):
         if result_type == 'numeric':
             self.type = \
               Builtin_type('integer'
-                           if t1.name == 'integer' and t2.name == 'integer'
+                           if self.expr1.is_integer() and \
+                              self.expr2.is_integer()
                            else 'float')
         else:
             self.type = Builtin_type(result_type)

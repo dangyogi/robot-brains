@@ -14,6 +14,7 @@ dim inum_tasks[2]
 
 subroutine run
     run_all "init"
+    goto wait_for_start
 
   label wait_for_start
     ======================================================================
