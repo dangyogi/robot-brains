@@ -259,7 +259,7 @@ def t_KEYWORD(t):
 
 def t_OPT_KEYWORD(t):
     r'\?[a-zA-Z_][a-zA-Z_0-9]*:'
-    t.value = Token(t, value=t.value[1:], lexpos=t.lexpos + 1)
+    t.value = Token(t)
     return t
 
 

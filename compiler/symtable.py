@@ -3,7 +3,7 @@
 from collections import OrderedDict
 from copy import deepcopy
 from math import isclose
-from itertools import tee, zip_longest
+from itertools import tee, zip_longest, chain
 
 import scanner
 
@@ -121,6 +121,9 @@ class Variable(Entity):
 
     def __init__(self, ident, **kws):
         Entity.__init__(self, ident)
+        self.lexpos = ident.lexpos
+        self.lineno = ident.lineno
+        self.filename = ident.filename
         self.type = Builtin_type(ident.type)
         for k, v in kws.items():
             setattr(self, k, v)
@@ -136,7 +139,11 @@ class Variable(Entity):
             self.set_bit = module.next_set_bit
             module.next_set_bit += 1
         self.type.prepare(module)
-        self.type = self.type.get_type()
+
+    def set_module(self, module):
+        self.immediate = True
+        assert module.immediate
+        self.value = module.value
 
     def is_numeric(self):
         return self.type.is_numeric()
@@ -152,6 +159,9 @@ class Variable(Entity):
 
     def is_boolean(self):
         return self.type.is_boolean()
+
+    def is_module(self):
+        return self.type.is_module()
 
 
 class Required_parameter(Symtable):
@@ -255,7 +265,6 @@ class Typedef(Entity):
     def do_prepare(self, module):
         super().do_prepare(module)
         self.type.prepare(module)
-        self.type = self.type.get_type()
 
 
 class Type(Symtable):
@@ -280,6 +289,16 @@ class Type(Symtable):
     def is_boolean(self):
         return False
 
+    def is_module(self):
+        return False
+
+    def can_take_type(self, arg_type):
+        my_t = self.get_type()
+        arg_t = arg_type.get_type()
+        if type(my_t) != type(arg_t):
+            return False
+        return my_t._can_take_type(arg_t)
+
 
 class Builtin_type(Type):
     def __init__(self, name):
@@ -303,6 +322,13 @@ class Builtin_type(Type):
     def is_boolean(self):
         return self.name == 'boolean'
 
+    def is_module(self):
+        return self.name == 'module'
+
+    def _can_take_type(self, arg_type):
+        return self.name == arg_type.name or \
+               self.name == 'float' and arg_type.name == 'integer'
+
 
 class Typename_type(Type):
     def __init__(self, ident):
@@ -313,7 +339,7 @@ class Typename_type(Type):
 
     def get_type(self):
         r'Only valid after prepared.'
-        return self.typedef.type
+        return self.typedef.type.get_type()
 
     def do_prepare(self, module):
         super().do_prepare(module)
@@ -342,12 +368,15 @@ class Typename_type(Type):
     def is_boolean(self):
         return self.typedef.type.is_boolean()
 
+    def is_module(self):
+        return self.typedef.type.is_module()
+
 
 class Label_type(Type):
     r'''
     self.required_params is (type, ...)
     self.optional_params is (type, ...)
-    self.kw_params is ((KEYWORD, ((type, ...), (type, ...))), ...)
+    self.kw_params is {KEYWORD: (kw_optional, (type, ...), (type, ...))}
     '''
     def __init__(self, label_type, taking_blocks, return_types=()):
         # self.label_type is "subroutine", "function", "label",
@@ -356,12 +385,17 @@ class Label_type(Type):
 
         if taking_blocks is None:
             self.required_params = self.optional_params = ()
-            self.kw_params = ()
+            self.kw_params = {}
         else:
             assert len(taking_blocks) == 2
             assert len(taking_blocks[0]) == 2
             self.required_params, self.optional_params = taking_blocks[0]
-            self.kw_params = taking_blocks[1]
+            self.kw_params = {}
+            for keyword, (req, opt) in taking_blocks[1]:
+                if keyword[0] == '?':
+                    self.kw_params[keyword[1:].lower()] = (True, req, opt)
+                else:
+                    self.kw_params[keyword.lower()] = (False, req, opt)
         if self.label_type in ('subroutine', 'native_subroutine'):
             self.return_label_type = Label_type('label', None)
         elif self.label_type in ('function', 'native_function'):
@@ -387,21 +421,88 @@ class Label_type(Type):
         super().do_prepare(module)
         def prepare_type(t):
             t.prepare(module)
-            return t.get_type()
-        self.required_params = tuple(prepare_type(t)
-                                     for t in self.required_params)
-        self.optional_params = tuple(prepare_type(t)
-                                     for t in self.optional_params)
-        self.kw_params = tuple((keyword,
-                                (tuple(prepare_type(t) for t in req),
-                                 tuple(prepare_type(t) for t in opt)))
-                               for keyword, (req, opt) in self.kw_params)
+            return t
+        for t in self.required_params:
+            t.prepare(module)
+        for t in self.optional_params:
+            t.prepare(module)
+        for (_, req, opt) in self.kw_params.values():
+            for t in req:
+                t.prepare(module)
+            for t in opt:
+                t.prepare(module)
         if hasattr(self, 'return_label_type'):
             self.return_label_type.prepare(module)
-        if hasattr(self, 'return_types'):
-            # These types were passed to the Label_type for return_label_type
-            # and have been prepared by that Label_type.
-            self.return_types = tuple(t.get_type() for t in self.return_types)
+        # self.return_types have already been passed to the Label_type for
+        # return_label_type and have been prepared by that Label_type.
+
+    def ok_as_return_for(self, fn_subr_type):
+        fn_t = fn_subr_type.get_type()
+        if self.label_type != 'label' or self.kw_params:
+            return False
+        arg_types = fn_t.return_label_type.required_params
+        if len(arg_types) < len(self.required_params) or \
+           len(arg_types) > len(self.required_params) + len(optional_params):
+            return False
+        for arg_type, param_type in zip(arg_types,
+                                        chain(self.required_params,
+                                              self.optional_params)):
+            if not param_type.get_type().can_take_type(arg_type):
+                return False
+        return True
+
+    def _can_take_type(self, arg_type):
+        # Do I provide all of args that arg_type requires, and can arg_type
+        # accept all of the args that I might provide?
+
+        if (self.label_type == 'label') != (arg_type.label_type == 'label'):
+            # Must both be labels, or neither labels
+            return False
+
+        def check_pos_params(my_req, my_opt, arg_req, arg_opt):
+            if len(my_req) + len(my_opt) > len(arg_req) + len(arg_opt):
+                # arg_type must be able to take max number of params
+                return False
+            if len(my_req) < len(arg_req):
+                # arg_type must be able to take min number of params
+                return False
+            for my_param, arg_param in zip(chain(my_req, my_opt),
+                                           chain(arg_req, arg_opt)):
+                if not arg_param.get_type().can_take_type(my_param):
+                    return False
+
+        # Check positonal parameters
+        if not check_pos_params(
+                 self.required_params, self.optional_params,
+                 arg_type.required_params, arg_type.optional_params):
+            return False
+
+        # Check kw_params
+        my_req_kws = set()
+        for keyword, (kw_optional, req, opt) in self.kw_params.items():
+            if keyword not in arg_type.kw_params:
+                return False
+            arg_kw_optional, arg_req, arg_opt = arg_type.kw_params[keyword]
+            if kw_optional:
+                if not arg_kw_optional:
+                    return False
+            else:
+                my_req_kws.add(keyword)
+            if not check_pos_params(req, opt, arg_req, arg_opt):
+                return False
+
+        # Does arg have any required kws that I may not provide?
+        for arg_keyword, (arg_kw_optional, _, _) in arg_type.kw_params.items():
+            if not arg_kw_optional and arg_keyword not in my_req_kws:
+                return False
+
+        # For subroutines and functions, check the return_type_label
+        if self.label_type != 'label':  # then arg_type is not 'label' either
+            if not arg_type.return_type_label.can_take_type(
+                     self.return_type_label):
+                return False
+
+        return True
 
 
 class Param_block(Symtable):
@@ -480,6 +581,9 @@ class Param_block(Symtable):
         optional_types = tuple(p.type for p in self.optional_params)
         if self.name == '__pos__':
             return required_types, optional_types
+        if self.optional:
+            # This is a hack to represent optional keywords...
+            return '?' + self.name, (required_types, optional_types)
         return self.name, (required_types, optional_types)
 
 
@@ -638,11 +742,13 @@ class With_parameters(Symtable):
 
     def kw_parameter(self, keyword, optional=False):
         lname = keyword.value.lower()
+        if optional:
+            lname = lname[1:]
         if lname in self.kw_parameters:
             scanner.syntax_error("Duplicate keyword",
                                  keyword.lexpos, keyword.lineno)
         self.current_param_block = self.kw_parameters[lname] = \
-          Param_block(keyword.value, optional)
+          Param_block(keyword.value[1:], optional)
 
     def dump_contents(self, f, indent):
         for pb in self.gen_param_blocks():
@@ -660,7 +766,7 @@ class With_parameters(Symtable):
         Returns None if not found, unless error_not_found.
         '''
         for pb in self.gen_param_blocks():
-            param = lookup_param(ident, error_not_found=False)
+            param = pb.lookup_param(ident, error_not_found=False)
             if param is not None:
                 return param
         if error_not_found:
@@ -852,7 +958,6 @@ class Native_function(Native_subroutine):
     def do_prepare(self, module):
         super().do_prepare(module)
         self.return_type.prepare(module)
-        self.return_type = self.return_type.get_type()
 
 
 class Statement(Step):
@@ -948,11 +1053,24 @@ class Call_statement(Statement):
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
-        if not isinstance(self.args[0].type, Label_type) or \
-           self.args[0].type.label_type == 'label':
-            scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
-                                 self.args[0].lexpos, self.args[0].lineno,
-                                 self.args[0].filename)
+        if len(self.args) == 2:
+            self.returning_to = None
+        else:
+            assert len(self.args) == 4
+            self.returning_to = self.args[3]
+            if not isinstance(self.returning_to.type.get_type(), Label_type) \
+               or self.args[0].type.get_type().label_type != 'label':
+                scanner.syntax_error("Must be a LABEL",
+                                     self.returning_to.lexpos,
+                                     self.returning_to.lineno,
+                                     self.returning_to.filename)
+
+            if not isinstance(self.args[0].type.get_type(), Label_type) or \
+               self.args[0].type.get_type().label_type == 'label':
+                scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
+                                     self.args[0].lexpos, self.args[0].lineno,
+                                     self.args[0].filename)
+
         # FIX: Check argument numbers/types against fn parameters
 
 
@@ -1278,6 +1396,9 @@ class Expr(Step):
     def is_boolean(self):
         return self.type.is_boolean()
 
+    def is_module(self):
+        return self.type.is_module()
+
 
 class Literal(Expr):
     immediate = True
@@ -1454,6 +1575,13 @@ class Call_fn(Expr):
         # self.type has to be done for each instance...
         super().do_prepare_step(module, last_label, last_fn_subr)
         self.fn = self.fn.prepare_step(module, last_label, last_fn_subr)
+        fn_type = self.fn.type.get_type()
+        if not isinstance(fn_type, Label_type) or \
+           fn_type.label_type not in ('function', 'native_function') or \
+           len(fn_type.return_types) != 1:
+            scanner.syntax_error("Must be a FUNCTION returning a single value",
+                                 self.fn.lexpos, self.fn.lineno,
+                                 self.fn.filename)
         self.pos_arguments = tuple(expr.prepare_step(module, last_label,
                                                      last_fn_subr)
                                    for expr in self.pos_arguments)
@@ -1462,7 +1590,6 @@ class Call_fn(Expr):
                                                   last_fn_subr)
                                 for expr in pos_arguments))
                 for keyword, pos_arguments in self.kw_arguments)
-        # FIX: Check for only one return_types?
         self.type = self.fn.type.return_types[0]
         # FIX: Check arguments number/types against self.fn.type parameter
         #      number/types

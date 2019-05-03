@@ -202,11 +202,17 @@ def p_all(p):
     lvalue : simple_primary '.' IDENT
     lvalue : simple_primary '[' expr ']'
     parameter_types : pos_parameter_types kw_parameter_types
-    kw_parameter_type : KEYWORD pos_parameter_types
-    kw_parameter_type : OPT_KEYWORD pos_parameter_types
     from_opt : FROM primary
     """
     p[0] = tuple(p[1:])
+
+
+def p_kw_parameter_type(p):
+    '''
+    kw_parameter_type : KEYWORD pos_parameter_types
+    kw_parameter_type : OPT_KEYWORD pos_parameter_types
+    '''
+    p[0] = (p[1].value, p[2])
 
 
 def p_module(p):
