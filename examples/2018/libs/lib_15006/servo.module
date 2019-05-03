@@ -1,0 +1,12 @@
+# servo.module
+
+module ichannel ?min: min_angle ?max: max_angle
+
+
+subroutine set_min
+    return
+
+
+subroutine set_max
+    return
+

@@ -7,7 +7,7 @@ var right_motor is module
 
 
 subroutine init
-    left_motor.set_reversed? to: true?
+    left_motor.set_reversed to: true?
     return
 
 

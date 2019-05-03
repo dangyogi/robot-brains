@@ -1,10 +1,12 @@
+# drive_train.module
+
 module
 
-#use left_motor
-#use right_motor
+use motor as left_motor 1
+use motor as right_motor 2
 
 use skid_drive left_motor: left_motor right_motor: right_motor
 
 subroutine init
-    set left_motor.reversed? to: true?
+    left_motor.set_reversed to: true?
     return

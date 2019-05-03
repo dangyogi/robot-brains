@@ -1,10 +1,12 @@
+# auto.module
+
 module
 
 use drive_train
 
-#use latch_servo min: 0 max: 60deg
+use servo as latch_servo 1 min: 0 max: 60deg
 
-#use spinner_motor
+use spinner_motor
 
 
 subroutine start

@@ -223,6 +223,7 @@ class Use(Entity):
                                    in self.kw_arguments)
         #print("Use.prepare_used_module", module, self.module_name,
         #      "done with arguments")
+        # FIX: pass constant module parameters
         self.module.prepare_module()
         self.run_hook("prepare_used_module", module)
         #print("Use.prepare_used_module", module, self.module_name, "done")

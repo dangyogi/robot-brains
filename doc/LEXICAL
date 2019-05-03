@@ -78,9 +78,11 @@ literals:
             - converted to seconds
         - angles (deg, rad, rot)
             - converted to degrees
-        - force (oz, lb(s), lb, g, kg, newton(s) (N), dyne(s))
+        - angular speed (rps, rpm)
+            - converted to degrees/sec
+        - force (oz, lb(s), newton(s) (N), dyne(s))
             - converted to lbs
-        - mass (oz, lb(s), gram(s) (g), kgram(s) (kg))
+        - mass (gram(s) (g), kgram(s) (kg))
             - converted to lbs
         - speed (ips, ipm, fps, fpm, mps, mpm, mph)
             - converted to in/sec
