@@ -438,34 +438,48 @@ class Label_type(Type):
         # return_label_type and have been prepared by that Label_type.
 
     def ok_as_return_for(self, fn_subr_type):
-        fn_t = fn_subr_type.get_type()
-        if self.label_type != 'label' or self.kw_params:
-            return False
-        arg_types = fn_t.return_label_type.required_params
-        if len(arg_types) < len(self.required_params) or \
-           len(arg_types) > len(self.required_params) + len(optional_params):
-            return False
-        for arg_type, param_type in zip(arg_types,
-                                        chain(self.required_params,
-                                              self.optional_params)):
-            if not param_type.get_type().can_take_type(arg_type):
-                return False
-        return True
+        fn_ret_t = fn_subr_type.get_type().return_label_type.get_type()
+        return fn_ret_t.can_take_type(self)
 
     def _can_take_type(self, arg_type):
-        # I am a LABEL variable, and arg_type is a actual LABEL.  Can arg_type
+        # I am a LABEL variable, and arg_type is an actual LABEL.  Can arg_type
         # safely be assigned to this variable?
         #
         # I.e., do I provide all of args that arg_type requires, and can
         # arg_type accept all of the args that I might provide?
+        #
+        # Finally, if I expect a return, can my return accept the arg_type
+        # return?  I.e., can the arg_type return label variable take my return
+        # label?
 
         if (self.label_type == 'label') != (arg_type.label_type == 'label'):
             # Must both be labels, or neither labels; otherwise one expects to
             # return and the other doesn't.
             return False
 
-        def check_pos_params(sending_req, sending_opt,
-                             receiving_req, receiving_opt):
+        if not arg_type.satisfied_by(self.required_params,
+                                     self.optional_params, self.kw_params):
+            return False
+
+        # For subroutines and functions, check the return_type_label
+        if self.label_type != 'label':  # then arg_type is not 'label' either
+            # Can the arg_type take my return label to return to?
+            if not arg_type.return_type_label.can_take_type(
+                     self.return_type_label):
+                return False
+
+    def satisfied_by(self, req, opt=(), kw_params={}):
+        r'''Do req, opt, kw_params satisfy my parameter needs?
+        
+        Without anything extra that I don't know about?
+
+        kw_params is {KEYWORD: (kw_optional, (type, ...), (type, ...))}
+
+        Does not check return types.
+        '''
+
+        def check_pos_params(receiving_req, receiving_opt,
+                             sending_req, sending_opt):
             if len(sending_req) + len(sending_opt) > \
                len(receiving_req) + len(receiving_opt):
                 # receiving type must be able to take max number of params
@@ -480,35 +494,27 @@ class Label_type(Type):
                     return False
 
         # Check positonal parameters
-        if not check_pos_params(
-                 self.required_params, self.optional_params,
-                 arg_type.required_params, arg_type.optional_params):
+        if not check_pos_params(self.required_params, self.optional_params,
+                                req, opt):
             return False
 
         # Check kw_params
-        my_req_kws = set()
-        for keyword, (kw_optional, req, opt) in self.kw_params.items():
-            if keyword not in arg_type.kw_params:
+        sending_req_kws = set()
+        for keyword, (kw_optional, req, opt) in kw_params.items():
+            if keyword not in self.kw_params:
                 return False
-            arg_kw_optional, arg_req, arg_opt = arg_type.kw_params[keyword]
+            my_kw_optional, my_req, my_opt = self.kw_params[keyword]
             if kw_optional:
-                if not arg_kw_optional:
+                if not my_kw_optional:
                     return False
             else:
-                my_req_kws.add(keyword)
-            if not check_pos_params(req, opt, arg_req, arg_opt):
+                sending_req_kws.add(keyword)
+            if not check_pos_params(my_req, my_opt, req, opt):
                 return False
 
-        # Does arg have any required kws that I may not provide?
-        for arg_keyword, (arg_kw_optional, _, _) in arg_type.kw_params.items():
-            if not arg_kw_optional and arg_keyword not in my_req_kws:
-                return False
-
-        # For subroutines and functions, check the return_type_label
-        if self.label_type != 'label':  # then arg_type is not 'label' either
-            # Can the arg_type take my return label to return to?
-            if not arg_type.return_type_label.can_take_type(
-                     self.return_type_label):
+        # Does I have any required kws that may not be provided?
+        for my_keyword, (my_kw_optional, _, _) in self.kw_params.items():
+            if not my_kw_optional and my_keyword not in sending_req_kws:
                 return False
 
         return True
@@ -1009,49 +1015,6 @@ class Statement(Step):
                     _prepare(x)
         _prepare(self.args)
 
-    def gen_code(self, generator, indent):
-        generator.reset_temps()
-
-        statements = []
-        def process_expr(arg):
-            pre_statements, C_expr, _, _ = generator.gen_expr(arg)
-            statements.extend(pre_statements)
-            return C_expr
-
-        def process_lvalue(arg):
-            pre_statements, C_lvalue, _, _ = generator.gen_lvalue(arg)
-            statements.extend(pre_statements)
-            return C_lvalue
-
-        statement_type = self.args[0].lower()
-
-        processed_args = self.follow(self.args,
-                                     self.arguments[statement_type],
-                                     process_expr,
-                                     process_lvalue)
-
-        statements.extend(format.format(processed_args)
-                          for format in self.formats[statement_type])
-        generator.emit_statements(statements, indent)
-
-    def follow(self, args, arg_map, expr_fn, lvalue_fn):
-        if arg_map == 'expr':
-            return expr_fn(args)
-        if arg_map == 'lvalue':
-            return lvalue_fn(args)
-        if arg_map == 'ignore':
-            return args
-        assert isinstance(arg_map, tuple)
-        assert isinstance(args, tuple)
-        if arg_map[0] == '*':
-            assert len(arg_map) == 2, \
-                   f"expected len(arg_map) == 2 for {arg_map}"
-            return tuple(self.follow(arg, arg_map[1], expr_fn, lvalue_fn)
-                         for arg in args)
-        assert len(args) <= len(arg_map)
-        return tuple(self.follow(arg, map, expr_fn, lvalue_fn)
-                     for arg, map in zip(args, arg_map))
-
 
 class Call_statement(Statement):
     # primary arguments [RETURNING_TO primary]
@@ -1279,15 +1242,6 @@ class Conditions(Step):
                 scanner.syntax_error("Must be boolean expression",
                                      expr.lexpos, expr.lineno, expr.filename)
 
-    def gen_code(self, f, indent=0):
-        prefix = indent_str(indent)
-        print(f"{prefix}dlt_mask = 0", file=f)
-        def gen_bit(i, n):
-            print(f"{prefix}if ({n}) dlt_mask |= (2 << {i})", file=f)
-        for i, expr in enumerate(self.exprs):
-            gen_bit(len(self.exprs) - 1, expr)
-        print(f"{prefix}switch (dlt_mask)", "{", file=f)
-
 
 class DLT_MAP(Step):
     r'''self.map is a Token whose value is the "X X..." map.
@@ -1380,18 +1334,6 @@ class Actions(Step):
         super().do_prepare_step(module, last_label, last_fn_subr)
         for action in self.actions:
             action.prepare_step(module, last_label, last_fn_subr)
-
-    def gen_code(self, f, indent=0):
-        # FIX: this is old and obsolete.  Delete???
-        prefix = indent_str(indent)
-        for _, column_numbers, statements in self.blocks:
-            for i in column_numbers:
-                print(f"{prefix}case {i}:", file=f)
-            prefix = indent_str(indent + 4)
-            for s in statements:
-                print(f"{prefix}{s};", file=f)
-        print(prefix, end='', file=f)
-        print("}", file=f)
 
 
 class DLT(Step):
@@ -1622,7 +1564,8 @@ class Call_fn(Expr):
         if not isinstance(fn_type, Label_type) or \
            fn_type.label_type not in ('function', 'native_function') or \
            len(fn_type.return_types[0][0]) != 1 or \
-           fn_type.return_types[0][1] or fn_type.return_types[1]:
+           fn_type.return_types[0][1] or \
+           fn_type.return_types[1]:
             scanner.syntax_error("Must be a FUNCTION returning a single value",
                                  self.fn.lexpos, self.fn.lineno,
                                  self.fn.filename)
