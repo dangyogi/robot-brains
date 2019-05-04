@@ -210,7 +210,7 @@ def p_kw_parameter_type(p):
     kw_parameter_type : KEYWORD pos_parameter_types
     kw_parameter_type : OPT_KEYWORD pos_parameter_types
     '''
-    p[0] = (p[1].value, p[2])
+    p[0] = (p[1], p[2])
 
 
 def p_module(p):
@@ -741,6 +741,9 @@ def _find_module(name, path):
 
 if __name__ == "__main__":
     import sys
+
+    print("recursion limit was", sys.getrecursionlimit(), "setting to 100")
+    sys.setrecursionlimit(100)
 
     assert len(sys.argv) == 2
     filename = sys.argv[1]

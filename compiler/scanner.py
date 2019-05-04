@@ -41,6 +41,27 @@ class Token:
                 #f" lineno={self.lineno} lexpos={self.lexpos}"
                 ">")
 
+    # Make these usuable as dict keys to preserve the location info for
+    # KEYWORDS.  This also does the lower() calls to make the comparisons
+    # case-insensitive.
+    def __hash__(self):
+        if self.value[-1] == ':' and self.value[0] == '?':
+            return hash(self.value[1:].lower())
+        return hash(self.value.lower())
+
+    def __eq__(self, b):
+        if self.value[-1] == ':' and self.value[0] == '?':
+            v1 = self.value[1:]
+        else:
+            v1 = self.value
+        if isinstance(b, Token):
+            v2 = b.value
+        else:
+            v2 = b
+        if v2[-1] == ':' and v2[0] == '?':
+            v2 = v2[1:]
+        return v1.lower() == v2.lower()
+
 
 reserved = frozenset((
     'ABS',

@@ -118,6 +118,7 @@ class Variable(Entity):
     explicit_typedef = False
     dimensions = ()
     immediate = False
+    constant = False
 
     def __init__(self, ident, **kws):
         Entity.__init__(self, ident)
@@ -206,7 +207,9 @@ class Use(Entity):
         Entity.__init__(self, ident)
         self.module_name = module_name
         self.pos_arguments = pos_arguments  # (primary, ...)
-        self.kw_arguments = kw_arguments    # ((KEYWORD, (primary, ...)), ...)
+
+        # ((KEYWORD_TOKEN, (primary, ...)), ...)
+        self.kw_arguments = kw_arguments
 
     def __repr__(self):
         return f"<Use {self.name.value} {self.module_name.value}>"
@@ -293,12 +296,17 @@ class Type(Symtable):
     def is_module(self):
         return False
 
-    def can_take_type(self, arg_type):
+    def can_take_type(self, arg_type, report_arg_type=True):
+        r'''Check and report any type mismatches.
+
+        If there are any mismatches, the syntax error is reported against
+        `arg_type` if `report_arg_type` is True, else against self.
+        '''
         my_t = self.get_type()
         arg_t = arg_type.get_type()
         if type(my_t) != type(arg_t):
             return False
-        return my_t._can_take_type(arg_t)
+        return my_t._can_take_type(arg_t, report_arg_type)
 
 
 class Builtin_type(Type):
@@ -326,9 +334,18 @@ class Builtin_type(Type):
     def is_module(self):
         return self.name == 'module'
 
-    def _can_take_type(self, arg_type):
-        return self.name == arg_type.name or \
-               self.name == 'float' and arg_type.name == 'integer'
+    def _can_take_type(self, arg_type, report_arg_type):
+        if not (self.name == arg_type.name or \
+                self.name == 'float' and arg_type.name == 'integer'):
+            if report_arg_type:
+                # raises syntax_error on arg_type
+                scanner.syntax_error("Incompatible type",
+                                     arg_type.lexpos, arg_type.lineno,
+                                     arg_type.filename)
+            else:
+                # raises syntax_error on self
+                scanner.syntax_error("Incompatible type",
+                                     self.lexpos, self.lineno, self.filename)
 
 
 class Typename_type(Type):
@@ -379,8 +396,8 @@ class Label_type(Type):
                        "native_subroutine" or "native_function"
     self.required_params is (type, ...)
     self.optional_params is (type, ...)
-    self.kw_params is {KEYWORD: (kw_optional, (type, ...), (type, ...))}
-    self.return_types is ((req, opt), ((keyword, (req, opt)), ...))
+    self.kw_params is {KEYWORD_TOKEN: (kw_optional, (type, ...), (type, ...))}
+    self.return_types is ((req, opt), ((keyword_token, (req, opt)), ...))
     '''
     def __init__(self, label_type, taking_blocks, return_types=None):
         self.label_type = label_type.lower()
@@ -394,10 +411,10 @@ class Label_type(Type):
             self.required_params, self.optional_params = taking_blocks[0]
             self.kw_params = {}
             for keyword, (req, opt) in taking_blocks[1]:
-                if keyword[0] == '?':
-                    self.kw_params[keyword[1:].lower()] = (True, req, opt)
+                if keyword.value[0] == '?':
+                    self.kw_params[keyword] = (True, req, opt)
                 else:
-                    self.kw_params[keyword.lower()] = (False, req, opt)
+                    self.kw_params[keyword] = (False, req, opt)
         if self.label_type in ('subroutine', 'native_subroutine'):
             self.return_label_type = Label_type('label', None)
         elif self.label_type in ('function', 'native_function'):
@@ -438,10 +455,13 @@ class Label_type(Type):
         # return_label_type and have been prepared by that Label_type.
 
     def ok_as_return_for(self, fn_subr_type):
+        r'''
+        Assumes I'm at fault if there are any mismatches.
+        '''
         fn_ret_t = fn_subr_type.get_type().return_label_type.get_type()
         return fn_ret_t.can_take_type(self)
 
-    def _can_take_type(self, arg_type):
+    def _can_take_type(self, arg_type, report_arg_type):
         # I am a LABEL variable, and arg_type is an actual LABEL.  Can arg_type
         # safely be assigned to this variable?
         #
@@ -455,84 +475,208 @@ class Label_type(Type):
         if (self.label_type == 'label') != (arg_type.label_type == 'label'):
             # Must both be labels, or neither labels; otherwise one expects to
             # return and the other doesn't.
-            return False
+            if report_arg_type:
+                scanner.syntax_error(
+                  "Expected LABEL" if self.label_type == 'label'
+                                   else "Expected SUBROUTINE or FUNCTION",
+                  arg_type.lexpos, arg_type.lineno, arg_type.filename)
+            else:
+                scanner.syntax_error(
+                  "Expected LABEL" if arg_type.label_type == 'label'
+                                   else "Expected SUBROUTINE or FUNCTION",
+                  self.lexpos, self.lineno, self.filename)
 
-        if not arg_type.satisfied_by(self.required_params,
-                                     self.optional_params, self.kw_params):
-            return False
+        arg_type.satisfied_by(self, self.required_params, self.optional_params,
+                              self.kw_params, not report_arg_type)
 
-        # For subroutines and functions, check the return_type_label
+        # For subroutines and functions, check the return_label_type
         if self.label_type != 'label':  # then arg_type is not 'label' either
             # Can the arg_type take my return label to return to?
-            if not arg_type.return_type_label.can_take_type(
-                     self.return_type_label):
-                return False
+            arg_type.return_label_type.can_take_type(self.return_label_type,
+                                                     not report_arg_type)
 
-    def satisfied_by(self, req, opt=(), kw_params={}):
+    def satisfied_by(self, arg_location,
+                     req, opt=(), kw_params={}, report_arg_type=True):
         r'''Do req, opt, kw_params satisfy my parameter needs?
         
         Without anything extra that I don't know about?
 
-        kw_params is {KEYWORD: (kw_optional, (type, ...), (type, ...))}
+        kw_params is {KEYWORD_TOKEN: (kw_optional, (type, ...), (type, ...))}
 
         Does not check return types.
+
+        If there are any mismatches, `result` determines what to do:
+            
+            - 'report_arg_type' raises syntax_error on req/opt/kw_params
+            - 'report_self' raises syntax_error on self
+
+        Returns None if OK.
+
+        Returns tuple of indexes to the first faulty parameter.  The first
+        index being 0 for req, 1 for opt and 2 for kw_params.
+
+        Returns None if there are no problems.
         '''
 
         def check_pos_params(receiving_req, receiving_opt,
                              sending_req, sending_opt):
+            # receiving is always from self, sending from req/opt/kw_params.
             if len(sending_req) + len(sending_opt) > \
                len(receiving_req) + len(receiving_opt):
                 # receiving type must be able to take max number of params
-                return False
+                max_rec_len = len(receiving_req) + len(receiving_opt)
+                if report_arg_type:
+                    if len(sending_req) > max_rec_len:
+                        arg = sending_req[max_rec_len]
+                    else:
+                        arg = sending_opt[max_rec_len - len(sending_req)]
+                    scanner.syntax_error("Too many arguments",
+                                         arg.lexpos, arg.lineno, arg.filename)
+                else:
+                    if receiving_opt:
+                        rec = receiving_opt[-1]
+                    elif receiving_req:
+                        rec = receiving_req[-1]
+                    else:
+                        rec = self
+                    scanner.syntax_error(
+                      "Not enough parameters declared; "
+                      f"got {max_rec_len}, "
+                      f"expected {len(sending_req) + len(sending_opt)}",
+                      rec.lexpos, rec.lineno, rec.filename)
             if len(sending_req) < len(receiving_req):
                 # receiving type must be able to take min number of params
-                return False
+                if report_arg_type:
+                    if sending_req:
+                        arg = sending_req[-1]
+                    else:
+                        arg = arg_location
+                    scanner.syntax_error(
+                      "Not enough required parameters declared; "
+                      f"got {len(sending_req)}, expected {len(receiving_req)}",
+                      arg.lexpos, arg.lineno, arg.filename)
+                else:
+                    arg = receiving_req[len(sending_req)]
+                    scanner.syntax_error(
+                      "Too many required parameters declared",
+                      arg.lexpos, arg.lineno, arg.filename)
             for sending_param, receiving_param \
              in zip(chain(sending_req, sending_opt),
                     chain(receiving_req, receiving_opt)):
-                if not receiving_param.get_type().can_take_type(sending_param):
-                    return False
+                receiving_param.get_type().can_take_type(sending_param,
+                                                         report_arg_type)
 
         # Check positonal parameters
-        if not check_pos_params(self.required_params, self.optional_params,
-                                req, opt):
-            return False
+        check_pos_params(self.required_params, self.optional_params, req, opt)
 
         # Check kw_params
         sending_req_kws = set()
         for keyword, (kw_optional, req, opt) in kw_params.items():
             if keyword not in self.kw_params:
-                return False
+                if report_arg_type:
+                    scanner.syntax_error("Undeclared KEYWORD",
+                                         keyword.lexpos, keyword.lineno,
+                                         keyword.filename)
+                else:
+                    scanner.syntax_error(f"Missing KEYWORD -- {keyword.value}",
+                                         self.lexpos, self.lineno,
+                                         self.filename)
             my_kw_optional, my_req, my_opt = self.kw_params[keyword]
             if kw_optional:
                 if not my_kw_optional:
-                    return False
+                    if report_arg_type:
+                        scanner.syntax_error("Must not be optional KEYWORD",
+                                             keyword.lexpos, keyword.lineno,
+                                             keyword.filename)
+                    else:
+                        for kw in self.kw_params.keys():
+                            if kw == keyword:
+                                scanner.syntax_error("Must be optional KEYWORD",
+                                                     kw.lexpos, kw.lineno,
+                                                     kw.filename)
+                        assert False, f"Couldn't find KEYWORD {keyword}"
             else:
                 sending_req_kws.add(keyword)
-            if not check_pos_params(my_req, my_opt, req, opt):
-                return False
+            print(self, "checking keyword", keyword)
+            check_pos_params(my_req, my_opt, req, opt)
 
         # Does I have any required kws that may not be provided?
         for my_keyword, (my_kw_optional, _, _) in self.kw_params.items():
             if not my_kw_optional and my_keyword not in sending_req_kws:
-                return False
+                if report_arg_type:
+                    for kw in self.kw_params.keys():
+                        if kw == my_keyword:
+                            scanner.syntax_error("Must be required KEYWORD",
+                                                 kw.lexpos, kw.lineno,
+                                                 kw.filename)
+                            break
+                    else:
+                        scanner.syntax_error(
+                          f"Missing required KEYWORD -- {my_keyword.value}",
+                          arg_location.lexpos, arg_location.lineno,
+                          arg_location.filename)
+                else:
+                    scanner.syntax_error("Must not be required KEYWORD",
+                                         my_keyword.lexpos, my_keyword.lineno,
+                                         my_keyword.filename)
 
-        return True
+    def satisfied_by_arguments(self, arg_location, pos_arguments,
+                               kw_arguments=()):
+        r'''Checks if arguments are OK for me.
+
+        kw_arguments is ((KEYWORD_TOKEN, (primary, ...)), ...)
+
+        If there are any mismatches, a syntax_error is reported on the
+        arguments.
+
+        Does not check return type.
+        '''
+        class Type_proxy:
+            r'''Exposes the expr.type preserving the lexpos, lineno and
+            filename of the expr for syntax error reporting.
+            '''
+            def __init__(self, expr):
+                self.expr = expr
+
+            @property
+            def lexpos(self):
+                return self.expr.lexpos
+
+            @property
+            def lineno(self):
+                return self.expr.lineno
+
+            @property
+            def filename(self):
+                return self.expr.filename
+
+            def get_type(self):
+                return self.expr.type.get_type()
+
+        self.satisfied_by(arg_location,
+                          tuple(Type_proxy(e) for e in pos_arguments),
+                          (),
+                          {keyword: (False, 
+                                     tuple(Type_proxy(e)
+                                           for e in pos_arguments),
+                                     ())
+                           for keyword, pos_arguments in kw_arguments})
 
 
 class Param_block(Symtable):
     r'''
     self.passed is set to True/False at compile time for module parameters.
     '''
-    def __init__(self, name="__pos__", optional=False):
-        self.name = name
+    def __init__(self, name=None, optional=False):
+        self.name = name  # token
         self.required_params = []
         self.optional_params = []
         self.optional = optional
 
     def dump_details(self, f):
         super().dump_details(f)
-        print(' ', self.name, sep='', end='', file=f)
+        print(' ', self.name.value if self.name is not None else "__pos__",
+              sep='', end='', file=f)
         if self.optional:
             print(" optional", end='', file=f)
 
@@ -594,11 +738,8 @@ class Param_block(Symtable):
         r'Must run prepare first!'
         required_types = tuple(p.type for p in self.required_params)
         optional_types = tuple(p.type for p in self.optional_params)
-        if self.name == '__pos__':
+        if self.name is None:
             return required_types, optional_types
-        if self.optional:
-            # This is a hack to represent optional keywords...
-            return '?' + self.name, (required_types, optional_types)
         return self.name, (required_types, optional_types)
 
 
@@ -746,7 +887,7 @@ class With_parameters(Symtable):
         global Last_parameter_obj
         self.pos_param_block = None
         self.current_param_block = None
-        self.kw_parameters = OrderedDict()      # {lname: Param_block}
+        self.kw_parameters = OrderedDict()      # {keyword_token: Param_block}
         Last_parameter_obj = self
 
     def pos_parameter(self, param):
@@ -756,14 +897,12 @@ class With_parameters(Symtable):
         self.current_param_block.add_parameter(param)
 
     def kw_parameter(self, keyword, optional=False):
-        lname = keyword.value.lower()
-        if optional:
-            lname = lname[1:]
-        if lname in self.kw_parameters:
+        r'`keyword` is a Token.'
+        if keyword in self.kw_parameters:
             scanner.syntax_error("Duplicate keyword",
                                  keyword.lexpos, keyword.lineno)
-        self.current_param_block = self.kw_parameters[lname] = \
-          Param_block(keyword.value[1:], optional)
+        self.current_param_block = self.kw_parameters[keyword] = \
+          Param_block(keyword, optional)
 
     def dump_contents(self, f, indent):
         for pb in self.gen_param_blocks():
@@ -850,6 +989,12 @@ class Module(With_parameters, Opmode):
 
     def do_prepare_module(self):
         super().do_prepare_module()
+
+        # Make all module parameters constant variables.
+        for pb in self.gen_param_blocks():
+            for p in pb.gen_parameters():
+                p.variable.constant = True
+
         last_label = None
         last_fn_subr = None
         for step, next_step in pairwise(self.steps):
@@ -928,7 +1073,7 @@ class Function(Subroutine):
         self.return_types = (((Builtin_type(ident.type),), ()), ())
 
     def set_return_types(self, return_types):
-        r'self.return_types is ((req, opt), ((keyword, (req, opt)), ...))'
+        r'self.return_types is ((req, opt), ((keyword_token, (req, opt)), ...))'
         self.return_types = return_types
 
     def get_return_types(self):
@@ -1018,6 +1163,10 @@ class Statement(Step):
 
 class Call_statement(Statement):
     # primary arguments [RETURNING_TO primary]
+    #
+    # arguments is ((primary, ...), kw_arguments)
+    #
+    # kw_arguments is ((KEYWORD_TOKEN, (primary, ...)), ...)
     def is_final(self):
         return len(self.args) > 2
 
@@ -1036,16 +1185,17 @@ class Call_statement(Statement):
 
             self.returning_to = self.args[3]
             ret_to_t = self.returning_to.type.get_type()
-            if not isinstance(ret_to_t, Label_type) \
-               or ret_to_t.label_type != 'label' \
-               or ret_to_t.kw_params:
-                scanner.syntax_error("Must be a LABEL (with no KEYWORDs)",
+            if not isinstance(ret_to_t, Label_type) or \
+               ret_to_t.label_type != 'label':
+                scanner.syntax_error("Must be a LABEL",
                                      self.returning_to.lexpos,
                                      self.returning_to.lineno,
                                      self.returning_to.filename)
 
-            if not ret_to_t.required_params and not ret_to_t.optional_params:
-                # return label does not accept any positional parameters
+            if not ret_to_t.required_params and \
+               not ret_to_t.optional_params and \
+               not ret_to_t.kw_params:
+                # return label does not accept any parameters
                 if not isinstance(fn_type, Label_type) or \
                    fn_type.label_type not in ('subroutine',
                                               'native_subroutine'):
@@ -1054,7 +1204,10 @@ class Call_statement(Statement):
                                          self.args[0].lineno,
                                          self.args[0].filename)
             else:
-                if not ret_to_t.required_params:
+                # return label does accept parameters
+                if not ret_to_t.required_params and \
+                   all(opt for opt, _, _ in ret_to_t.kw_params.values()):
+                    # return label does not require any parameters
                     if not isinstance(fn_type, Label_type) or \
                        fn_type.label_type == 'label':
                         scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
@@ -1062,6 +1215,7 @@ class Call_statement(Statement):
                                              self.args[0].lineno,
                                              self.args[0].filename)
                 else:
+                    # return label requires some parameters
                     if not isinstance(fn_type, Label_type) or \
                        fn_type.label_type not in ('function',
                                                   'native_function'):
@@ -1075,7 +1229,8 @@ class Call_statement(Statement):
                                          self.returning_to.lineno,
                                          self.returning_to.filename)
 
-        # FIX: Check argument numbers/types against fn parameters
+        fn_type.satisfied_by_arguments(self.args[0], self.args[1][0],
+                                       self.args[1][1])
 
 
 class Opeq_statement(Statement):
@@ -1474,21 +1629,21 @@ class Got_keyword(Expr):
 
     def __init__(self, lexpos, lineno, keyword, label=None, module=False):
         Expr.__init__(self, lexpos, lineno)
-        self.keyword = keyword
+        self.keyword = keyword  # Token
         self.label = label
         self.module = module
 
     def __repr__(self):
-        return f"<Got_keyword {self.keyword}>"
+        return f"<Got_keyword {self.keyword.value}>"
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         if self.module:
-            pb = module.kw_parameters.get(self.keyword.value.lower())
+            pb = module.kw_parameters.get(self.keyword)
         else:
             if self.label is None:
                 self.label = last_label
-            pb = self.label.kw_parameters.get(self.keyword.value.lower())
+            pb = self.label.kw_parameters.get(self.keyword)
         if pb is None:
             scanner.syntax_error("Keyword Not Found",
                                  self.keyword.lexpos, self.keyword.lineno,
@@ -1551,7 +1706,9 @@ class Call_fn(Expr):
         Expr.__init__(self, fn.lexpos, fn.lineno)
         self.fn = fn
         self.pos_arguments = pos_arguments  # (primary, ...)
-        self.kw_arguments = kw_arguments    # ((KEYWORD, (primary, ...)), ...)
+
+        # ((KEYWORD_TOKEN, (primary, ...)), ...)
+        self.kw_arguments = kw_arguments 
 
     def __repr__(self):
         return f"<Call_fn {self.fn} {self.pos_arguments} {self.kw_arguments}>"
@@ -1574,9 +1731,9 @@ class Call_fn(Expr):
         for _, pos_arguments in self.kw_arguments:
             for expr in pos_arguments:
                 expr.prepare_step(module, last_label, last_fn_subr)
-        self.type = self.fn.type.return_types[0][0][0]
-        # FIX: Check arguments number/types against self.fn.type parameter
-        #      number/types
+        fn_type.satisfied_by_arguments(self.fn, self.pos_arguments,
+                                       self.kw_arguments)
+        self.type = fn_type.return_types[0][0][0]
 
 
 class Unary_expr(Expr):
