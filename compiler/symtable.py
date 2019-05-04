@@ -237,10 +237,70 @@ class Use(Entity):
                 expr.prepare_step(module, None, None)
         #print("Use.prepare_used_module", module, self.module_name,
         #      "done with arguments")
-        # FIX: pass constant module parameters
+
+        #print(module, "use passing constant module parameters")
+
+        def pass_pos_args(pb, arg_location, args):
+            if pb is None:
+                max_pb_args = 0
+            else:
+                max_pb_args = len(pb.required_params) + len(pb.optional_params)
+            if max_pb_args < len(args):
+                location = args[max_pb_args]
+                scanner.syntax_error("Too many arguments passed to module",
+                                     location.lexpos, location.lineno,
+                                     location.filename)
+            if pb is None:
+                return
+
+            if len(pb.required_params) > len(args):
+                if args:
+                    location = args[-1]
+                else:
+                    location = arg_location
+                scanner.syntax_error("Not enough arguments passed to module",
+                                     location.lexpos, location.lineno,
+                                     location.filename)
+
+            for p, a in zip_longest(pb.gen_parameters(), args):
+                if a is None:
+                    p.passed = False
+                else:
+                    p.passed = True
+                    if a.get_step().immediate:
+                        p.variable.immediate = True
+                        p.variable.value = a.get_step().value
+            pb.passed = True
+
+        pass_pos_args(self.module.pos_param_block, self.name,
+                      self.pos_arguments)
+        kws_passed = set()
+        for keyword, args in self.kw_arguments:
+            if keyword not in self.module.kw_parameters:
+                scanner.syntax_error("Module does not have this KEYWORD",
+                                     keyword.lexpos, keyword.lineno,
+                                     keyword.filename)
+            pass_pos_args(self.module.kw_parameters[keyword], keyword, args)
+            kws_passed.add(keyword)
+
+        for keyword, pb in self.module.kw_parameters.items():
+            if keyword not in kws_passed:
+                if not pb.optional:
+                    scanner.syntax_error(
+                      f"Missing required KEYWORD -- {keyword.value}",
+                      self.name.lexpos, self.name.lineno, self.name.filename)
+                pb.passed = False
+
         self.module.prepare_module()
         self.run_hook("prepare_used_module", module)
         #print("Use.prepare_used_module", module, self.module_name, "done")
+
+    @property
+    def type(self):
+        return self.module.type
+
+    def get_step(self):
+        return self.module
 
 
 class Typedef(Entity):
@@ -272,9 +332,6 @@ class Typedef(Entity):
 
 
 class Type(Symtable):
-    def do_prepare(self, module):
-        super().do_prepare(module)
-
     def get_type(self):
         return self
 

@@ -1,0 +1,135 @@
+- Opmode.setup()
+
+  - The whole prepare process is run by calling 'setup()' on the opmode.  This:
+
+    1. runs link_uses() on builtins and then itself
+    2. runs prepare_module() on builtins and then itself
+
+
+- Opmode.link_uses()
+
+  Does a deepcopy on each used module.
+
+  - calls copy_module() on each Use object
+
+
+- Use.copy_module()
+
+  - looks up self.module_name in Opmode_module.modules_seen
+  - does a deepcopy on it
+  - stores in self.module
+  - calls self.module.link_uses()
+
+
+- Opmode.prepare_module():  <hooked>
+
+  - self.prepare_entities()  <hooked>
+    - calls prepare(self) on each named Entity in the Namespace
+  - self.prepare(self)
+  - for each Use object:
+    - prepare_used_module(self)
+  - Module.do_prepare_module() does (in addition):
+    - set param.variable.constant = True on all module parameters
+    - call prepare_step(self, last_label, last_fn_subr) on each step
+    - reports syntax error on final statement errors
+      - last step, and last step before label must be is_final()
+      - all other steps must not be is_final()
+
+
+- Symtable.prepare(module)   <hooked>
+
+  - Variable.do_prepare(module)
+    - figure out self.set_bit
+    - call self.type.prepare(module)
+
+  - Typedef.do_prepare(module)
+    - call self.type.prepare(module)
+
+  - Typename_type.do_prepare(module)
+    - self.typedef = lookup(self.ident, module)
+    - verify that what was found was a Typedef object
+
+  - Label_type.do_prepare(module)
+    - call prepare(module) on all parameters
+    - call prepare(module) on self.return_label_type
+
+  - With_parameters.do_prepare(module)
+    - call prepare(module) on each Param_block
+    - check for duplicate parameter names
+    - assign passed bits
+
+    - Label.do_prepare(module) also does:
+      - create Label_type
+      - store it in self.type
+      - call prepare(module) on it
+
+    - Native_subroutine.do_prepare(module) also does:
+      - create Label_type
+      - store it in self.type
+      - call prepare(module) on it
+
+      - Native_function.do_prepare(module) also does:
+        - call prepare(module) on self.return_type
+
+  - Param_block.do_prepare(module)
+    - call prepare(module) on each parameter object
+
+  - Required_parameter.do_prepare(module)
+    - set self.type to self.variable.type
+      
+
+- Use.prepare_used_module(module)   <hooked>
+
+  - call prepare_step(module, None, None) on all module arguments
+  - pass constant module parameters, set all module parameter 'passed' bits
+  - call self.module.prepare_module()
+
+
+- Step.prepare_step(module, last_label, last_fn_subr)  <hooked>
+
+  - Statement.prepare_step
+    - call prepare_step on everything in self.args that isinstance of Step
+
+    - Call_statement.do_prepare_step also does:
+      - verify that the fn is the proper Label_type
+      - verify RETURNING_TO: Label_type
+      - verify RETURNING_TO: parameters against fn.type return parameters
+      - verify arguments against fn.type
+
+    - Opeq_statement.do_prepare_step also does:
+      - verify types of arguments against operator
+
+  - DLT.do_prepare_step
+    - call conditions.prepare_step
+    - call actions.prepare_step
+
+  - Conditions.do_prepare_step
+    - call prepare_step on all exprs
+    - verify all exprs are boolean
+
+  - Actions.do_prepare_step
+    - call prepare_step on all actions
+
+  - Reference.do_prepare_step
+    - lookup(ident, module)
+    - store it in self.referent
+    - store self.referent.type in self.type
+
+  - Dot.do_prepare_step
+    - call prepare_step on expr
+    - verify that expr is immediate module
+    - lookup ident in module
+    - store it in self.referent
+    - store self.referent.type in self.type
+    - if self.referent is immediate
+      - set self.immediate
+      - store self.referent.value in self.value
+
+  - Subscript.do_prepare_step ...
+  - Got_keyword.do_prepare_step ...
+  - Got_param.do_prepare_step ...
+  - Call_fn.do_prepare_step ...
+  - Unary_expr.do_prepare_step ...
+  - Binary_expr.do_prepare_step ...
+  - Return_label.do_prepare_step ...
+
