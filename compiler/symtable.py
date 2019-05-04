@@ -304,6 +304,9 @@ class Type(Symtable):
         '''
         my_t = self.get_type()
         arg_t = arg_type.get_type()
+        if my_t is arg_t:
+            # same type!
+            return True
         if type(my_t) != type(arg_t):
             return False
         return my_t._can_take_type(arg_t, report_arg_type)
@@ -597,7 +600,6 @@ class Label_type(Type):
                         assert False, f"Couldn't find KEYWORD {keyword}"
             else:
                 sending_req_kws.add(keyword)
-            print(self, "checking keyword", keyword)
             check_pos_params(my_req, my_opt, req, opt)
 
         # Does I have any required kws that may not be provided?
@@ -675,8 +677,8 @@ class Param_block(Symtable):
 
     def dump_details(self, f):
         super().dump_details(f)
-        print(' ', self.name.value if self.name is not None else "__pos__",
-              sep='', end='', file=f)
+        if self.name is not None:
+            print(' ', self.name.value, sep='', end='', file=f)
         if self.optional:
             print(" optional", end='', file=f)
 
