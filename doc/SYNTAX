@@ -31,7 +31,7 @@ use : USE IDENT [AS IDENT] arguments NEWLINES
 typedef : TYPE IDENT IS type NEWLINES
 
 
-type : FUNCTION [TAKING parameter_types] [RETURNING 1{simple_type}]
+type : FUNCTION [TAKING parameter_types] [RETURNING parameter_types]
      | SUBROUTINE [TAKING parameter_types]
      | LABEL [TAKING parameter_types]
      | IDENT
@@ -60,13 +60,13 @@ step : label_decl
          {typedef}
          {vartype}
          {statement}
-     | NATIVE FUNCTION IDENT {IDENT} [RETURNING 1{simple_type}] NEWLINES
+     | NATIVE FUNCTION IDENT {IDENT} [RETURNING simple_type] NEWLINES
          1{native_line}
      | NATIVE SUBROUTINE IDENT {IDENT} NEWLINES
          1{native_line}
 
 
-label_decl : FUNCTION IDENT parameters [RETURNING 1{simple_type}] NEWLINES
+label_decl : FUNCTION IDENT parameters [RETURNING parameter_types] NEWLINES
            | SUBROUTINE IDENT parameters NEWLINES
            | LABEL IDENT parameters NEWLINES
 

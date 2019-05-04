@@ -44,7 +44,6 @@ def p_empty_tuple(p):
     kw_arguments :
     parameter_types_list :
     primarys :
-    returning_opt :
     steps :
     statements :
     action_statements :
@@ -79,7 +78,7 @@ def p_second(p):
     simple_primary : '(' expr ')'
     simple_type : '(' type ')'
     const_expr : '(' const_expr ')'
-    returning_opt : RETURNING simple_types
+    returning_opt : RETURNING parameter_types
     taking_opt : TAKING parameter_types
     label_decl : FUNCTION fn_name parameters set_returning_opt newlines
                | SUBROUTINE sub_name parameters newlines
@@ -108,6 +107,7 @@ def p_none(p):
     optional_parameters : optional_parameters optional_parameter
     kw_parameters :
                   | kw_parameters keyword pos_parameters
+    returning_opt :
     uses :
          | uses use
     taking_opt :
@@ -121,7 +121,6 @@ def p_1tuple(p):
     conditions : condition
     parameter_types_list1 : simple_type
     kw_parameter_types : kw_parameter_type
-    simple_types : simple_type
     dimensions : dimension
     native_lines : native_line
     native_elements : native_element
@@ -134,7 +133,6 @@ def p_append(p):
     kw_arguments : kw_arguments kw_argument
     statements : statements statement
     conditions : conditions condition
-    simple_types : simple_types simple_type
     pos_arguments : pos_arguments primary
     kw_parameter_types : kw_parameter_types kw_parameter_type
     parameter_types_list1 : parameter_types_list1 simple_type

@@ -375,13 +375,14 @@ class Typename_type(Type):
 
 class Label_type(Type):
     r'''
+    self.label_type is "subroutine", "function", "label",
+                       "native_subroutine" or "native_function"
     self.required_params is (type, ...)
     self.optional_params is (type, ...)
     self.kw_params is {KEYWORD: (kw_optional, (type, ...), (type, ...))}
+    self.return_types is ((req, opt), ((keyword, (req, opt)), ...))
     '''
-    def __init__(self, label_type, taking_blocks, return_types=()):
-        # self.label_type is "subroutine", "function", "label",
-        #                    "native_subroutine" or "native_function"
+    def __init__(self, label_type, taking_blocks, return_types=None):
         self.label_type = label_type.lower()
 
         if taking_blocks is None:
@@ -401,8 +402,7 @@ class Label_type(Type):
             self.return_label_type = Label_type('label', None)
         elif self.label_type in ('function', 'native_function'):
             self.return_types = return_types
-            self.return_label_type = Label_type('label',
-                                                ((return_types, ()), ()))
+            self.return_label_type = Label_type('label', return_types)
 
     def __repr__(self):
         info = []
@@ -453,23 +453,30 @@ class Label_type(Type):
         return True
 
     def _can_take_type(self, arg_type):
-        # Do I provide all of args that arg_type requires, and can arg_type
-        # accept all of the args that I might provide?
+        # I am a LABEL variable, and arg_type is a actual LABEL.  Can arg_type
+        # safely be assigned to this variable?
+        #
+        # I.e., do I provide all of args that arg_type requires, and can
+        # arg_type accept all of the args that I might provide?
 
         if (self.label_type == 'label') != (arg_type.label_type == 'label'):
-            # Must both be labels, or neither labels
+            # Must both be labels, or neither labels; otherwise one expects to
+            # return and the other doesn't.
             return False
 
-        def check_pos_params(my_req, my_opt, arg_req, arg_opt):
-            if len(my_req) + len(my_opt) > len(arg_req) + len(arg_opt):
-                # arg_type must be able to take max number of params
+        def check_pos_params(sending_req, sending_opt,
+                             receiving_req, receiving_opt):
+            if len(sending_req) + len(sending_opt) > \
+               len(receiving_req) + len(receiving_opt):
+                # receiving type must be able to take max number of params
                 return False
-            if len(my_req) < len(arg_req):
-                # arg_type must be able to take min number of params
+            if len(sending_req) < len(receiving_req):
+                # receiving type must be able to take min number of params
                 return False
-            for my_param, arg_param in zip(chain(my_req, my_opt),
-                                           chain(arg_req, arg_opt)):
-                if not arg_param.get_type().can_take_type(my_param):
+            for sending_param, receiving_param \
+             in zip(chain(sending_req, sending_opt),
+                    chain(receiving_req, receiving_opt)):
+                if not receiving_param.get_type().can_take_type(sending_param):
                     return False
 
         # Check positonal parameters
@@ -499,6 +506,7 @@ class Label_type(Type):
 
         # For subroutines and functions, check the return_type_label
         if self.label_type != 'label':  # then arg_type is not 'label' either
+            # Can the arg_type take my return label to return to?
             if not arg_type.return_type_label.can_take_type(
                      self.return_type_label):
                 return False
@@ -889,13 +897,12 @@ class Label(With_parameters, Step, Entity):
     def do_prepare(self, module):
         #print(self.__class__.__name__, "do_prepare", self.name)
         super().do_prepare(module)
-        self.type = Label_type(self.__class__.__name__,
-                               self.as_taking_blocks(),
-                               self.get_returning_types())
+        self.type = Label_type(self.__class__.__name__, self.as_taking_blocks(),
+                               self.get_return_types())
         self.type.prepare(module)
 
-    def get_returning_types(self):
-        return ()
+    def get_return_types(self):
+        return None
 
     @property
     def value(self):
@@ -912,12 +919,13 @@ class Subroutine(Label):
 class Function(Subroutine):
     def __init__(self, ident):
         Subroutine.__init__(self, ident)
-        self.return_types = Builtin_type(ident.type),
+        self.return_types = (((Builtin_type(ident.type),), ()), ())
 
     def set_return_types(self, return_types):
+        r'self.return_types is ((req, opt), ((keyword, (req, opt)), ...))'
         self.return_types = return_types
 
-    def get_returning_types(self):
+    def get_return_types(self):
         return self.return_types
 
     def dump_details(self, f):
@@ -937,11 +945,11 @@ class Native_subroutine(With_parameters, Entity):
         super().do_prepare(module)
         self.type = Label_type(self.__class__.__name__,
                                self.as_taking_blocks(),
-                               self.get_returning_types())
+                               self.get_return_types())
         self.type.prepare(module)
 
-    def get_returning_types(self):
-        return ()
+    def get_return_types(self):
+        return None
 
 
 class Native_function(Native_subroutine):
@@ -952,8 +960,8 @@ class Native_function(Native_subroutine):
     def set_return_type(self, return_type):
         self.return_type = return_type
 
-    def get_returning_types(self):
-        return self.return_type,
+    def get_return_types(self):
+        return (((self.return_type,), ()), ())
 
     def do_prepare(self, module):
         super().do_prepare(module)
@@ -1062,20 +1070,47 @@ class Call_statement(Statement):
                                      self.args[0].filename)
         else:
             assert len(self.args) == 4
-            if not isinstance(fn_type, Label_type) or \
-               fn_type.label_type == 'label':
-                scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
-                                     self.args[0].lexpos, self.args[0].lineno,
-                                     self.args[0].filename)
+
             self.returning_to = self.args[3]
-            print("returning_to", self.returning_to)
             ret_to_t = self.returning_to.type.get_type()
             if not isinstance(ret_to_t, Label_type) \
-               or ret_to_t.label_type != 'label':
-                scanner.syntax_error("Must be a LABEL",
+               or ret_to_t.label_type != 'label' \
+               or ret_to_t.kw_params:
+                scanner.syntax_error("Must be a LABEL (with no KEYWORDs)",
                                      self.returning_to.lexpos,
                                      self.returning_to.lineno,
                                      self.returning_to.filename)
+
+            if not ret_to_t.required_params and not ret_to_t.optional_params:
+                # return label does not accept any positional parameters
+                if not isinstance(fn_type, Label_type) or \
+                   fn_type.label_type not in ('subroutine',
+                                              'native_subroutine'):
+                    scanner.syntax_error("Must be a SUBROUTINE",
+                                         self.args[0].lexpos,
+                                         self.args[0].lineno,
+                                         self.args[0].filename)
+            else:
+                if not ret_to_t.required_params:
+                    if not isinstance(fn_type, Label_type) or \
+                       fn_type.label_type == 'label':
+                        scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
+                                             self.args[0].lexpos,
+                                             self.args[0].lineno,
+                                             self.args[0].filename)
+                else:
+                    if not isinstance(fn_type, Label_type) or \
+                       fn_type.label_type not in ('function',
+                                                  'native_function'):
+                        scanner.syntax_error("Must be a FUNCTION",
+                                             self.args[0].lexpos,
+                                             self.args[0].lineno,
+                                             self.args[0].filename)
+                if not ret_to_t.ok_as_return_for(fn_type):
+                    scanner.syntax_error("Incompatible RETURNING_TO: label",
+                                         self.returning_to.lexpos,
+                                         self.returning_to.lineno,
+                                         self.returning_to.filename)
 
         # FIX: Check argument numbers/types against fn parameters
 
@@ -1586,7 +1621,8 @@ class Call_fn(Expr):
         fn_type = self.fn.type.get_type()
         if not isinstance(fn_type, Label_type) or \
            fn_type.label_type not in ('function', 'native_function') or \
-           len(fn_type.return_types) != 1:
+           len(fn_type.return_types[0][0]) != 1 or \
+           fn_type.return_types[0][1] or fn_type.return_types[1]:
             scanner.syntax_error("Must be a FUNCTION returning a single value",
                                  self.fn.lexpos, self.fn.lineno,
                                  self.fn.filename)
@@ -1595,7 +1631,7 @@ class Call_fn(Expr):
         for _, pos_arguments in self.kw_arguments:
             for expr in pos_arguments:
                 expr.prepare_step(module, last_label, last_fn_subr)
-        self.type = self.fn.type.return_types[0]
+        self.type = self.fn.type.return_types[0][0][0]
         # FIX: Check arguments number/types against self.fn.type parameter
         #      number/types
 
