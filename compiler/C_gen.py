@@ -127,7 +127,11 @@ def write_module_descriptor(m):
     print(f"struct module_descriptor_s {m.C_descriptor_name} = {{", file=C_file)
     print(f'    "{m.dotted_name}",   // name', file=C_file)
     print(f'    "{relative_path(m.filename)}",   // filename', file=C_file)
-    print(f'    &{m.C_label_descriptor_name},   // module_params', file=C_file)
+    if isinstance(m, symtable.Module):
+        print(f'    &{m.C_label_descriptor_name},   // module_params',
+              file=C_file)
+    else:
+        print('    NULL,   // module_params', file=C_file)
     print('    0,   // vars_set', file=C_file)
     print('    0,   // lineno', file=C_file)
     labels = tuple(m.filter(symtable.Label))
@@ -135,7 +139,7 @@ def write_module_descriptor(m):
     print('    {   // labels', file=C_file)
     print("write_module_descriptor", m.C_global_name, len(m.names))
     for label in labels:
-        print(f"      &{label.C_descriptor_name},", file=C_file)
+        print(f"      &{label.C_label_descriptor_name},", file=C_file)
     print('    }', file=C_file)
     print("};", file=C_file)
 
@@ -147,21 +151,35 @@ def set_module_descriptor_pointer(m):
           file=C_file)
 
 
+@todo_with_args(symtable.Module, "prepare_module", Label_descriptors)
+def write_module_label_descriptor(module):
+    write_label_descriptor(module, module)
+
+
 @symtable.Label.as_pre_hook("prepare")
 def assign_label_names(label, module):
     # set C_global_name: globally unique name
     label.C_global_name = \
           f"{module.C_global_name}__{translate_name(label.name)}__label"
-    label.C_descriptor_name = label.C_global_name + "__desc"
+    label.C_label_descriptor_name = label.C_global_name + "__desc"
 
 
 @todo_with_args(symtable.Label, "prepare", Label_descriptors)
+def write_label_label_descriptor(label, module):
+    write_label_descriptor(label, module)
+
+
 def write_label_descriptor(label, module):
     print(file=C_file)
-    print(f"struct label_descriptor_s {label.C_descriptor_name} = {{",
+    print(f"struct label_descriptor_s {label.C_label_descriptor_name} = {{",
           file=C_file)
-    print(f'    "{label.name.value}",   // name', file=C_file)
-    print(f'    "{label.type.get_type().label_type}",   // type', file=C_file)
+    if isinstance(label, symtable.Module):
+        print(f'    "{label.name}",   // name', file=C_file)
+        print('    "module",   // type', file=C_file)
+    else:
+        print(f'    "{label.name.value}",   // name', file=C_file)
+        print(f'    "{label.type.get_type().label_type}",   // type',
+              file=C_file)
     param_blocks = tuple(label.gen_param_blocks())
     print(f'    {len(param_blocks)},   // num_param_blocks', file=C_file)
     print('    (struct param_block_descriptor_s []){   '
@@ -183,7 +201,7 @@ def write_label_descriptor(label, module):
         param_locations = ", ".join(
           f"&{module.C_global_name}.{p.variable.C_local_name}"
           for p in pb.gen_parameters())
-        print(f'        {{{param_locations}}},   // param_locations',
+        print(f'        (void *[]){{{param_locations}}},   // param_locations',
               file=C_file)
         var_set_masks = ", ".join(f"{1 << p.variable.set_bit}"
                                   for p in pb.gen_parameters())
@@ -207,11 +225,12 @@ def write_label_descriptor(label, module):
 
 @todo_with_args(symtable.Label, "prepare", Init_labels)
 def init_label(label, module):
-    print(f"    {label.C_descriptor_name}.module = "
-            f"(struct module_descriptor_s *)&{module.C_global_name};",
-          file=C_file)
-    print(f"    {label.C_descriptor_name}.label = &&{label.C_global_name};",
-          file=C_file)
+    #print(f"    {label.C_label_descriptor_name}.module = "
+    #        f"(struct module_descriptor_s *)&{module.C_global_name};",
+    #      file=C_file)
+    print(
+      f"    {label.C_label_descriptor_name}.label = &&{label.C_global_name};",
+      file=C_file)
 
 
 @todo_with_args(symtable.Label, "prepare", Module_code)
@@ -223,6 +242,12 @@ def gen_label(label, module):
 def assign_variable_names(var, module):
     var.C_type = translate_type(var.type)
     var.C_local_name = translate_name(var.name.value)
+    module.module_instance_elements.append(partial(gen_var_field, var, module))
+
+
+def gen_var_field(var, module):
+    dims = ''.join(f"[{d}]" for d in var.dimensions)
+    print(f"{translate_type(var.type)} {var.C_local_name}{dims};", file=C_file)
 
 
 def assign_child_names(module):
@@ -402,7 +427,7 @@ Types = {
     "integer": "long",
     "boolean": "char",
     "string": "char *",
-    "module": "struct module_instance_s",
+    "module": "struct module_instance_s *",
 }
 
 

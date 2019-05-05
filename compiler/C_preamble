@@ -24,7 +24,6 @@ struct label_descriptor_s {
     struct label_descriptor_s *return_label;
 
     /////////////// initialized in module init:
-    struct module_descriptor_s *module;
     void *label;                  // set in label init code
 };
 
@@ -36,8 +35,8 @@ struct param_block_descriptor_s { // initialized outside of main
     int num_params;               // required and optional
     int num_required_params;
     int num_optional_params;
-    void *param_locations[];      // indexed by parameter number (first is 0)
-                                  // initialized as {&x, &y, ...}
+    void **param_locations;       // indexed by parameter number (first is 0)
+                                  // initialized as (void *[]){&x, &y, ...}
     unsigned long *var_set_masks; // all params, indexed by param number
                                   // applied to module.vars_set
                                   // initialized as (unsigned long []){...}

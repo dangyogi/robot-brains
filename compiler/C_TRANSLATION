@@ -2,7 +2,7 @@ Descriptors:
 
 - label_descriptor
   - one per label for each module instance
-  - init outside of main (except for module and label)
+  - init outside of main (except for label)
   - has:
     - char *name
     - char *type                     // 'label', 'subroutine', 'function',
@@ -14,7 +14,6 @@ Descriptors:
       - has one running bit for subroutines and functions
     * label_descriptor *return_label
       - for subroutines and functions
-    - module instance *module
     * void *label;                  // set in label init
 
 - param_block_descriptor

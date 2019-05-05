@@ -140,7 +140,7 @@ class Variable(Entity):
     r'''self.set_bit is the bit number in module.vars_set.  Set in prepare.
     '''
     explicit_typedef = False
-    dimensions = ()
+    dimensions = ()   # (int, ...)
     immediate = False
     constant = False
 
