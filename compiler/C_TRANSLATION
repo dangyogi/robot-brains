@@ -2,12 +2,11 @@ Descriptors:
 
 - label_descriptor
   - one per label for each module instance
-  - init outside of main (except for start_label)
+  - init outside of main (except for module and label)
   - has:
     - char *name
     - char *type                     // 'label', 'subroutine', 'function',
                                      // 'native_subroutine', 'native_function'
-    - module instance *module
     - int num_param_blocks
     * param_block_descriptors *param_block_decriptors
     * unsigned long params_passed   // one bit per var
@@ -15,7 +14,8 @@ Descriptors:
       - has one running bit for subroutines and functions
     * label_descriptor *return_label
       - for subroutines and functions
-    * void *start_label;            // set in label init
+    - module instance *module
+    * void *label;                  // set in label init
 
 - param_block_descriptor
   - one per param_block per label for each module instance
@@ -82,7 +82,7 @@ SOURCE FILE LAYOUT:
 - module instance * __module_instances__ (bottom-up "uses" order)
 
 - "main"
-  - init start_labels in all label_descriptors
+  - init module and label in all label_descriptors
   - set module descriptor pointer in all module instances
   - initialize module parameters/variables in all module instances
     - call exprs in use arguments
@@ -112,7 +112,7 @@ EXECUTABLE CODE:
     - store parameters
     - set passed bits in label.params_passed
     - set var_set bits in module.vars_set
-    - goto *start_label
+    - goto *label
 
 - return
   - check my running flag in label.params_passed
@@ -121,7 +121,7 @@ EXECUTABLE CODE:
     - set passed bits in label.params_passed
     - set var_set bits in module.vars_set
   - reset my running flag in label.params_passed
-  - goto *start_label
+  - goto *label
 
 - call
   - check and set remote running flag in label.params_passed
@@ -132,5 +132,5 @@ EXECUTABLE CODE:
     - set var_set bits in module.vars_set
   - call routine
     - store label_descriptor for return label in remote label.return_label
-    - goto *start_label
+    - goto *label
 

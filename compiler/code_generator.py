@@ -38,13 +38,18 @@ def run_todo_lists():
             fn()
 
 
-def init_code_generator(target_language):
-    global Target_language, Precedence_lookup
+def init_code_generator(target_language, rootdir):
+    global Target_language, Precedence_lookup, Rootdir
 
     Target_language = target_language
+    Rootdir = rootdir
 
     # {operator: (precedence_level, assoc)}
     Precedence_lookup = parse_precedence(Target_language.Precedence)
+
+
+def relative_path(filename):
+    return filename[len(Rootdir) + 1:]
 
 
 def generate(opmode):

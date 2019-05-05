@@ -9,7 +9,7 @@ import symtable
 from scanner import Token, syntax_error
 from code_generator import (
     todo, todo_with_args, translate_name, translate_type, unary, binary,
-    subscript,
+    subscript, relative_path,
 )
 
 
@@ -29,7 +29,7 @@ Module_instance_declarations = []
 Label_descriptors = []
 Module_descriptors = []
 Module_instances = []    # list of lines (without final commas)
-Init_start_labels = []
+Init_labels = []
 Set_module_descriptor_pointers = []
 Initialize_module_parameters = []
 Module_code = []
@@ -66,7 +66,7 @@ def start_main():
 def call_cycle_run():
     # FIX
     print(file=C_file)
-    print("    FIX: call cycle.run", file=C_file)
+    print("    // FIX: call cycle.run", file=C_file)
 
 
 def end_main():
@@ -75,14 +75,6 @@ def end_main():
 
 def done():
     C_file.close()
-
-
-@symtable.Label.as_pre_hook("prepare")
-def assign_label_names(label, module):
-    # set C_global_name: globally unique name
-    label.C_global_name = \
-          f"{translate_name(label.name)}__label__{module.instance_number}"
-    label.C_descriptor_name = label.C_global_name + "__desc"
 
 
 @symtable.Opmode.as_pre_hook("link_uses")
@@ -132,15 +124,17 @@ def add_module_instance(m):
 @todo_with_args(symtable.Opmode, "prepare_module", Module_descriptors)
 def write_module_descriptor(m):
     print(file=C_file)
-    print(f"struct module_descriptor_s {m.C_descriptor_name} {{", file=C_file)
+    print(f"struct module_descriptor_s {m.C_descriptor_name} = {{", file=C_file)
     print(f'    "{m.dotted_name}",   // name', file=C_file)
-    print(f'    "{m.filename}",   // filename', file=C_file)
+    print(f'    "{relative_path(m.filename)}",   // filename', file=C_file)
     print(f'    &{m.C_label_descriptor_name},   // module_params', file=C_file)
     print('    0,   // vars_set', file=C_file)
     print('    0,   // lineno', file=C_file)
-    print('    0,   // num_labels', file=C_file)
+    labels = tuple(m.filter(symtable.Label))
+    print(f'    {len(labels)},   // num_labels', file=C_file)
     print('    {   // labels', file=C_file)
-    for label in m.filter(symtable.Label):
+    print("write_module_descriptor", m.C_global_name, len(m.names))
+    for label in labels:
         print(f"      &{label.C_descriptor_name},", file=C_file)
     print('    }', file=C_file)
     print("};", file=C_file)
@@ -152,6 +146,77 @@ def set_module_descriptor_pointer(m):
     print(f"    {m.C_global_name}.descriptor = &{m.C_descriptor_name};",
           file=C_file)
 
+
+@symtable.Label.as_pre_hook("prepare")
+def assign_label_names(label, module):
+    # set C_global_name: globally unique name
+    label.C_global_name = \
+          f"{module.C_global_name}__{translate_name(label.name)}__label"
+    label.C_descriptor_name = label.C_global_name + "__desc"
+
+
+@todo_with_args(symtable.Label, "prepare", Label_descriptors)
+def write_label_descriptor(label, module):
+    print(file=C_file)
+    print(f"struct label_descriptor_s {label.C_descriptor_name} = {{",
+          file=C_file)
+    print(f'    "{label.name.value}",   // name', file=C_file)
+    print(f'    "{label.type.get_type().label_type}",   // type', file=C_file)
+    param_blocks = tuple(label.gen_param_blocks())
+    print(f'    {len(param_blocks)},   // num_param_blocks', file=C_file)
+    print('    (struct param_block_descriptor_s []){   '
+            '// param_block_descriptors',
+          file=C_file)
+    for pb in param_blocks:
+        print("      {", file=C_file)
+        if pb.name is None:
+            print('        NULL,   // name', file=C_file)
+        else:
+            print(f'        "{pb.name}",   // name', file=C_file)
+        print(f'        {len(pb.required_params) + len(pb.optional_params)},'
+                '   // num_params',
+              file=C_file)
+        print(f'        {len(pb.required_params)},   // num_required_params',
+              file=C_file)
+        print(f'        {len(pb.optional_params)},   // num_optional_params',
+              file=C_file)
+        param_locations = ", ".join(
+          f"&{module.C_global_name}.{p.variable.C_local_name}"
+          for p in pb.gen_parameters())
+        print(f'        {{{param_locations}}},   // param_locations',
+              file=C_file)
+        var_set_masks = ", ".join(f"{1 << p.variable.set_bit}"
+                                  for p in pb.gen_parameters())
+        print(f'        (unsigned long []){{{var_set_masks}}},'
+                '// var_set_masks',
+              file=C_file)
+        if pb.optional:
+            print(f'        {1 << pb.kw_passed_bit},   // kw_mask', file=C_file)
+        else:
+            print('        0,   // kw_mask', file=C_file)
+        param_masks = ", ".join(f"{1 << p.passed_bit}"
+                                for p in pb.optional_params)
+        print(f'        (unsigned long []){{{param_masks}}},'
+                '// param_masks',
+              file=C_file)
+        print("      },", file=C_file)
+    print('    },', file=C_file)
+    print('    0,   // params_passed', file=C_file)
+    print("};", file=C_file)
+
+
+@todo_with_args(symtable.Label, "prepare", Init_labels)
+def init_label(label, module):
+    print(f"    {label.C_descriptor_name}.module = "
+            f"(struct module_descriptor_s *)&{module.C_global_name};",
+          file=C_file)
+    print(f"    {label.C_descriptor_name}.label = &&{label.C_global_name};",
+          file=C_file)
+
+
+@todo_with_args(symtable.Label, "prepare", Module_code)
+def gen_label(label, module):
+    print(f"  {label.C_global_name}:", file=C_file)
 
 
 @symtable.Variable.as_post_hook("prepare")
@@ -229,7 +294,7 @@ Todo_lists = (
     Label_descriptors,
     Module_descriptors,
     [write_module_instance_list, start_main],
-    Init_start_labels,
+    Init_labels,
     Set_module_descriptor_pointers,
     Initialize_module_parameters,
     [call_cycle_run],

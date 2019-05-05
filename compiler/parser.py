@@ -680,9 +680,12 @@ parser = yacc.yacc()  # (start='opmode')
 
 
 def parse_opmode(filename, debug=False):
+    global Rootdir
+
     dirname = os.path.dirname(filename)
     path = [dirname]
-    libsdir = os.path.join(os.path.dirname(os.path.abspath(dirname)), "libs")
+    Rootdir = os.path.dirname(os.path.abspath(dirname))
+    libsdir = os.path.join(Rootdir, "libs")
     if os.path.isdir(libsdir):
         for entry in os.scandir(libsdir):
             if entry.is_dir():
@@ -761,7 +764,8 @@ if __name__ == "__main__":
     print()
     from code_generator import init_code_generator, generate
     import C_gen
-    init_code_generator(C_gen)
+    init_code_generator(C_gen, Rootdir)
+
     try:
         generate(opmode)
     except SyntaxError:

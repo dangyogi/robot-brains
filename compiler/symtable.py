@@ -103,7 +103,7 @@ class Symtable(Hook_base):
         pass
 
     def prepare(self, module):
-        r'''Called once per instance.
+        r'''Called on each instance.
         '''
         if not self.prepared:
             self.prepared = True
@@ -194,6 +194,7 @@ class Variable(Entity):
 
 class Required_parameter(Symtable):
     r'''
+    self.passed_bit is bit number in label.params_passed
     self.param_pos_number assigned in Param_block.add_parameter.
     '''
     def __init__(self, ident):
@@ -752,6 +753,7 @@ class Label_type(Type):
 
 class Param_block(Symtable):
     r'''
+    self.kw_passed_bit is bit number of kw_passed bit in label.params_passed
     self.passed is set to True/False at compile time for module parameters.
     '''
     def __init__(self, name=None, optional=False):
@@ -846,7 +848,7 @@ class Namespace(Symtable):
     def filter(self, cls):
         return (entity
                 for entity in self.names.values()
-                 if type(entity) == cls)
+                 if isinstance(entity, cls))
 
     def lookup(self, ident, error_not_found=True):
         r'''Look up ident in self.names.

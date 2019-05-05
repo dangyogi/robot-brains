@@ -13,7 +13,6 @@ struct label_descriptor_s {
     char *name;
     char *type;                   // 'label', 'subroutine', 'function',
                                   // 'native_subroutine', 'native_function'
-    struct module_descriptor_s *module;
     int num_param_blocks;
 
     // first param_block_descriptor is always positional parameters
@@ -25,7 +24,8 @@ struct label_descriptor_s {
     struct label_descriptor_s *return_label;
 
     /////////////// initialized in module init:
-    void *start_label;            // set in label init code
+    struct module_descriptor_s *module;
+    void *label;                  // set in label init code
 };
 
 
