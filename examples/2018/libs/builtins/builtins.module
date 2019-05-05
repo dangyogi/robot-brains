@@ -7,6 +7,7 @@
 module
 
 use cycle
+use telemetry
 
 type subr_t is subroutine
 
@@ -23,6 +24,7 @@ type c_config_t is subroutine taking ?p_next: label_t ?p_done: subr_t
 
 # FIX: temporary
 var isAlive? is boolean
+var isActive? is boolean
 var isStarted? is boolean
 
 

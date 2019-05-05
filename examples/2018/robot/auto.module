@@ -11,19 +11,18 @@ use spinner_motor
 
 subroutine start
     latch_servo.set_max
-    delay 2
+    cycle.delay 2
     latch_servo.set_min
 
-    set drive to: drive_train.skid_drive
-    drive.move 50in
+    drive_train.skid_drive.move 50in
 
     spinner_motor.set_power 20%
-    delay 2
+    cycle.delay 2
     spinner_motor.set_power 0
 
-    drive.move -20in
-    drive.turn 20deg
-    drive.move -50in
+    drive_train.skid_drive.move -20in
+    drive_train.skid_drive.turn 20deg
+    drive_train.skid_drive.move -50in
     return
 
 

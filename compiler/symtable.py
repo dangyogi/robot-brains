@@ -1218,6 +1218,7 @@ class Statement(Step):
                 for x in obj:
                     _prepare(x)
         _prepare(self.args)
+        # FIX: add type checking
 
 
 class Call_statement(Statement):

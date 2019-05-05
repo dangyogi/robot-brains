@@ -25,7 +25,7 @@ function get_position ? start
     |  X | set start to: 0
     =============================================================
     set position to:
-    -> ((left_motor.position + right_motor.position) / 2 * 66.7 - start)
+    -> (({left_motor.position} + {right_motor.position}) / 2 * 66.7 - start)
     telemetry.report key: "position" value: position
     return position
 

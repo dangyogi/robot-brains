@@ -136,3 +136,6 @@ subroutine schedule subr
     # Start the new thread
     subr returning_to: what_next
 
+
+subroutine delay secs
+    return
