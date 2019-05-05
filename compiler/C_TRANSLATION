@@ -5,7 +5,8 @@ Descriptors:
   - init outside of main (except for start_label)
   - has:
     - char *name
-    - char type                     // 'S', 'F' or 'L'
+    - char *type                     // 'label', 'subroutine', 'function',
+                                     // 'native_subroutine', 'native_function'
     - module instance *module
     - int num_param_blocks
     * param_block_descriptors *param_block_decriptors
@@ -64,26 +65,19 @@ Instances:
   - one for each module instance
   - has:
     - module_descriptor
-    - "use" module instances         // init outside of main
     - variables
       - module parameters init in main
     - label temps
     - label dlt_masks
 
 
-- opmode_instance opmode             // global variable
-- builtin_instance builtins          // global variable
-
-
 SOURCE FILE LAYOUT:
 
 - built-in types and C helper functions (from C_preamble file)
 - all module instance struct definitions
-  - used module instance structs before using module instance structs
-- top-level opmode instance declaration
-- builtins instance declaration
-- all descriptors
-  - label_descriptors before their module_descriptors
+- module instance declarations
+- label_descriptors
+- module_descriptors
 - int __num_modules__ constant
 - module instance * __module_instances__ (bottom-up "uses" order)
 

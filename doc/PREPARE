@@ -6,14 +6,14 @@
     2. runs prepare_module() on builtins and then itself
 
 
-- Opmode.link_uses()
+- Opmode.link_uses()    <hooked>
 
   Does a deepcopy on each used module.
 
   - calls copy_module() on each Use object
 
 
-- Use.copy_module()
+- Use.copy_module()     // called by module.link_uses()
 
   - looks up self.module_name in Opmode_module.modules_seen
   - does a deepcopy on it

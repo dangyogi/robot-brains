@@ -747,29 +747,24 @@ if __name__ == "__main__":
 
     assert len(sys.argv) == 2
     filename = sys.argv[1]
-    top_entity = parse_opmode(filename, # debug=True,
+    opmode = parse_opmode(filename, # debug=True,
                              )
-    print("top_entity is", top_entity)
+    print("opmode is", opmode)
     if False:
         print()
         print("dump:")
         print()
-        top_entity.dump(sys.stdout)
+        opmode.dump(sys.stdout)
 
     print()
-    print("setup:")
+    print("generate:")
     print()
-    try:
-        top_entity.setup()
-    except SyntaxError:
-        sys.exit(1)
-
-    print()
-    print("code:")
-    print()
+    from code_generator import init_code_generator, generate
     import C_gen
+    init_code_generator(C_gen)
     try:
-        C_gen.gen_program(top_entity)
+        generate(opmode)
     except SyntaxError:
         sys.exit(1)
+
 

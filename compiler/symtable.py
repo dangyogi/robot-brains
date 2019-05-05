@@ -1,6 +1,6 @@
 # symtable.py
 
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from copy import deepcopy
 from math import isclose
 from itertools import tee, zip_longest, chain
@@ -37,27 +37,50 @@ def top_namespace():
 class Hook_base:
     r'''Implements hook capability.
 
-    - Only allows one fn to be registered per cls, hook_name.
-    - Only calls the first fn found (in __mro__ order) when the hook is
+    - Allows multiple fns to be registered per cls, hook_name.
+    - Calls all fns found (in reverse __mro__ order) when the hook is
       triggered.
     '''
-    hooks = {}    # {(cls, hook_name): fn}
+    pre_hooks = defaultdict(list)     # {(cls, hook_name): [fn]}
+    post_hooks = defaultdict(list)    # {(cls, hook_name): [fn]}
 
     @classmethod
-    def add_hook(cls, hook_name, fn):
-        assert (cls, hook_name) not in Hook_base.hooks, \
-               f"More than one {hook_name!r} hook on {cls.__name__}"
-        Hook_base.hooks[cls, hook_name] = fn
-    
-    def run_hook(self, hook_name, *args, **kws):
-        r'''Passes self to the hook fn, in addition to *args and **kws.
+    def add_pre_hook(cls, hook_name, fn):
+        Hook_base.pre_hooks[cls, hook_name].append(fn)
 
-        Returns result of hook fn call -- None if no hook fn.
+    @classmethod
+    def add_post_hook(cls, hook_name, fn):
+        Hook_base.post_hooks[cls, hook_name].append(fn)
+
+    @classmethod
+    def as_pre_hook(cls, hook_name):
+        r'Function decorator'
+        def decorator(fn):
+            cls.add_pre_hook(hook_name, fn)
+            return fn
+        return decorator
+
+    @classmethod
+    def as_post_hook(cls, hook_name):
+        r'Function decorator'
+        def decorator(fn):
+            cls.add_post_hook(hook_name, fn)
+            return fn
+        return decorator
+
+    def run_pre_hooks(self, hook_name, *args, **kws):
+        r'''Passes self to the hook fns, in addition to *args and **kws.
         '''
-        for c in self.__class__.__mro__:
-            fn = Hook_base.hooks.get((c, hook_name))
-            if fn is not None:
-                return fn(self, *args, **kws)
+        for c in reversed(self.__class__.__mro__):
+            for fn in Hook_base.pre_hooks.get((c, hook_name), ()):
+                fn(self, *args, **kws)
+
+    def run_post_hooks(self, hook_name, *args, **kws):
+        r'''Passes self to the hook fns, in addition to *args and **kws.
+        '''
+        for c in reversed(self.__class__.__mro__):
+            for fn in Hook_base.post_hooks.get((c, hook_name), ()):
+                fn(self, *args, **kws)
 
 
 class Symtable(Hook_base):
@@ -84,8 +107,9 @@ class Symtable(Hook_base):
         '''
         if not self.prepared:
             self.prepared = True
+            self.run_pre_hooks("prepare", module)
             self.do_prepare(module)
-            self.run_hook("prepare", module)
+            self.run_post_hooks("prepare", module)
 
     def do_prepare(self, module):
         r'''Override this in the subclasses.
@@ -214,9 +238,12 @@ class Use(Entity):
     def __repr__(self):
         return f"<Use {self.name.value} {self.module_name.value}>"
 
-    def copy_module(self):
-        self.module = \
-          deepcopy(Opmode_module.modules_seen[self.module_name.value])
+    def copy_module(self, parent_module):
+        reference_module = Opmode_module.modules_seen[self.module_name.value]
+        self.module = deepcopy(reference_module)
+        reference_module.instance_count += 1
+        self.module.instance_number = reference_module.instance_count
+        self.module.parent_module = parent_module
         self.module.link_uses()
 
     def dump_details(self, f):
@@ -230,6 +257,7 @@ class Use(Entity):
         modules.
         '''
         #print("Use.prepare_used_module", module, self.module_name)
+        self.run_pre_hooks("prepare_used_module", module)
         for expr in self.pos_arguments:
             expr.prepare_step(module, None, None)
         for _, exprs in self.kw_arguments:
@@ -292,7 +320,7 @@ class Use(Entity):
                 pb.passed = False
 
         self.module.prepare_module()
-        self.run_hook("prepare_used_module", module)
+        self.run_post_hooks("prepare_used_module", module)
         #print("Use.prepare_used_module", module, self.module_name, "done")
 
     @property
@@ -868,8 +896,9 @@ class Namespace(Symtable):
     def prepare_entities(self):
         if not self.entities_prepared:
             self.entities_prepared = True
+            self.run_pre_hooks("prepare_entities")
             self.do_prepare_entities()
-            self.run_hook("prepare_entities")
+            self.run_post_hooks("prepare_entities")
 
     def do_prepare_entities(self):
         for obj in self.names.values():
@@ -910,25 +939,29 @@ class Opmode(Namespace):
                 module.dump(f, indent + 2)
 
     def setup(self):
-        print("setup linking uses")
+        print("setup: linking uses")
         builtins = self.modules_seen['builtins']
+        builtins.instance_number = 1
         builtins.link_uses()
         self.link_uses()
-        print("setup doing prepare")
+        print("setup: doing prepare")
         builtins.prepare_module()
         self.prepare_module()
-        print("setup done")
+        print("setup: done")
 
     def link_uses(self):
         #print(self.name, self.__class__.__name__, "link_uses")
+        self.run_pre_hooks("link_uses")
         for use in self.filter(Use):
             #print(self.name, "link_uses doing", use)
-            use.copy_module()
+            use.copy_module(self)
+        self.run_post_hooks("link_uses")
 
     def prepare_module(self):
         #print(self.name, self.__class__.__name__, "prepare_module")
+        self.run_pre_hooks("prepare_module")
         self.do_prepare_module()
-        self.run_hook("prepare_module")
+        self.run_post_hooks("prepare_module")
 
     def do_prepare_module(self):
         #print("Opmode.do_prepare_module", self.__class__.__name__, self.name)
@@ -1026,10 +1059,13 @@ class Module(With_parameters, Opmode):
     '''
     type = Builtin_type("module")
     immediate = True
+    parent_module = None
 
     def __init__(self):
         Opmode.__init__(self)
         With_parameters.__init__(self)
+        self.instance_count = 0  # only used in the reference modules created
+                                 # directly by the parser
 
     def register(self):
         pass
@@ -1084,8 +1120,10 @@ class Step(Symtable):
         '''
         if not self.step_prepared:
             self.step_prepared = True
+            self.run_pre_hooks("prepare_step", module, last_label, last_fn_subr)
             self.do_prepare_step(module, last_label, last_fn_subr)
-            self.run_hook("prepare_step", module, last_label, last_fn_subr)
+            self.run_post_hooks("prepare_step", module, last_label,
+                                last_fn_subr)
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         r'''Override this in the subclasses.

@@ -1,0 +1,7 @@
+# telemetry.module
+
+module
+
+
+subroutine report key: key$ value: value
+    return

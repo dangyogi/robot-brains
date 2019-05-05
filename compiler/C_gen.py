@@ -7,17 +7,236 @@ from functools import partial
 
 import symtable
 from scanner import Token, syntax_error
+from code_generator import (
+    todo, todo_with_args, translate_name, translate_type, unary, binary,
+    subscript,
+)
 
 
-C_UNSIGNED_LONG_BITS = 64
-Num_label_bits = 1              # running bit
-Max_bits_used = 0
+NUM_FLAG_BITS = 64
 
 
 Struct_indent = 0
 Struct_var_indent = 4
 Label_indent = 2
 Statement_indent = 4
+
+
+Assign_names = []
+Gen_step_code = []
+Module_instance_definitions = []
+Module_instance_declarations = []
+Label_descriptors = []
+Module_descriptors = []
+Module_instances = []    # list of lines (without final commas)
+Init_start_labels = []
+Set_module_descriptor_pointers = []
+Initialize_module_parameters = []
+Module_code = []
+
+
+def start_output():
+    "Opens C_file and writes the C_preamble to it."
+    global C_file
+    filename = f"{Opmode.name}.c"
+    C_file = open(filename, 'wt')
+    with open("C_preamble") as preamble:
+        print(f"// {filename}", file=C_file)
+        print(file=C_file)
+        C_file.write(preamble.read())
+
+
+def write_module_instance_list():
+    print(file=C_file)
+    print("const int __num_modules__ = ", len(Module_instances), ";",
+          sep='', file=C_file)
+    print("struct module_descriptor_s *__module_instances__[] = {", file=C_file)
+    for line in Module_instances:
+        print("    (struct module_descriptor_s *)&", line, ",",
+              sep='', file=C_file)
+    print("};", file=C_file)
+
+
+def start_main():
+    print(file=C_file)
+    print("int", file=C_file)
+    print("main(int argc, char *argv[], char *env[]) {", file=C_file)
+
+
+def call_cycle_run():
+    # FIX
+    print(file=C_file)
+    print("    FIX: call cycle.run", file=C_file)
+
+
+def end_main():
+    print("}", file=C_file)
+
+
+def done():
+    C_file.close()
+
+
+@symtable.Label.as_pre_hook("prepare")
+def assign_label_names(label, module):
+    # set C_global_name: globally unique name
+    label.C_global_name = \
+          f"{translate_name(label.name)}__label__{module.instance_number}"
+    label.C_descriptor_name = label.C_global_name + "__desc"
+
+
+@symtable.Opmode.as_pre_hook("link_uses")
+def assign_module_names(m):
+    # set C_global_name: globally unique name
+    if isinstance(m, symtable.Module):
+        m.C_global_name = \
+          f"{translate_name(m.name)}__module__{m.instance_number}"
+        if m.parent_module is not None and \
+           isinstance(m.parent_module, symtable.Module):
+            m.dotted_name = f"{m.parent_module.dotted_name}.{m.name}"
+        else:
+            m.dotted_name = m.name
+    else:
+        m.C_global_name = translate_name(m.name) + "__opmode"
+        m.dotted_name = m.name
+    m.C_descriptor_name = m.C_global_name + "__desc"
+    m.C_label_descriptor_name = m.C_global_name + "__label_desc"
+    m.C_struct_name = m.C_global_name + "__instance_s"
+
+    # list of fns that write elements into the module struct definition
+    m.module_instance_elements = []
+
+
+@todo_with_args(symtable.Opmode, "prepare_module", Module_instance_definitions)
+def write_module_instance_definition(module):
+    print(file=C_file)
+    print(f"struct {module.C_struct_name} {{", file=C_file)
+    print("    struct module_descriptor_s *descriptor;", file=C_file)
+    for element in module.module_instance_elements:
+        print("    ", end='', file=C_file)
+        element()
+    print("};", file=C_file)
+
+
+@todo_with_args(symtable.Opmode, "prepare_module", Module_instance_declarations)
+def write_module_instance_declaration(module):
+    print(file=C_file)
+    print(f"struct {module.C_struct_name} {module.C_global_name};", file=C_file)
+
+
+@symtable.Opmode.as_post_hook("link_uses")
+def add_module_instance(m):
+    Module_instances.append(m.C_global_name)
+
+
+@todo_with_args(symtable.Opmode, "prepare_module", Module_descriptors)
+def write_module_descriptor(m):
+    print(file=C_file)
+    print(f"struct module_descriptor_s {m.C_descriptor_name} {{", file=C_file)
+    print(f'    "{m.dotted_name}",   // name', file=C_file)
+    print(f'    "{m.filename}",   // filename', file=C_file)
+    print(f'    &{m.C_label_descriptor_name},   // module_params', file=C_file)
+    print('    0,   // vars_set', file=C_file)
+    print('    0,   // lineno', file=C_file)
+    print('    0,   // num_labels', file=C_file)
+    print('    {   // labels', file=C_file)
+    for label in m.filter(symtable.Label):
+        print(f"      &{label.C_descriptor_name},", file=C_file)
+    print('    }', file=C_file)
+    print("};", file=C_file)
+
+
+@todo_with_args(symtable.Opmode, "prepare_module",
+                Set_module_descriptor_pointers)
+def set_module_descriptor_pointer(m):
+    print(f"    {m.C_global_name}.descriptor = &{m.C_descriptor_name};",
+          file=C_file)
+
+
+
+@symtable.Variable.as_post_hook("prepare")
+def assign_variable_names(var, module):
+    var.C_type = translate_type(var.type)
+    var.C_local_name = translate_name(var.name.value)
+
+
+def assign_child_names(module):
+    for obj in module.names.values():
+        if isinstance(obj, symtable.Variable):
+            # name defined inside namespace struct
+            obj.C_type = translate_type(obj.type)
+            obj.C_local_name = translate_name(obj.name.value)
+        elif isinstance(obj, symtable.Use):
+            # name defined inside namespace struct
+            obj.C_local_name = translate_name(obj.name.value)
+        elif isinstance(obj, symtable.Typedef):
+            obj.C_type = translate_type(obj.type)
+            # name defined globally
+            obj.C_global_name = \
+              module.C_global_name + "__" + translate_name(obj.name.value)
+        elif isinstance(obj, symtable.Labeled_block):
+            # unique inside module
+            obj.C_local_name = translate_name(obj.name.value)
+
+            obj.C_flags_name = obj.C_local_name + "__flags__"
+            if isinstance(obj, symtable.Subroutine):
+                obj.C_ret_pointer_name = obj.C_local_name + "__ret_pointer__"
+
+            # name defined globally
+            obj.C_global_name = module.C_global_name + "__" + obj.C_local_name
+
+            obj.C_descriptor_name = obj.C_global_name + "__desc__"
+            obj.C_label_name = obj.C_global_name + "__label__"
+            obj.C_dlt_mask_name = obj.C_local_name + "__dlt_mask__"
+            obj.needs_dlt_mask = False
+            obj.C_temps = []  # [(type, name)]
+            assign_parameters(obj)
+        else:
+            # This seems to only be References
+            if (True):
+                print("assign_child_names: ignoring",
+                      obj.__class__.__name__, obj.name.value, "in",
+                      module.__class__.__name__, module.name.value)
+
+    if not isinstance(module, symtable.Opmode):
+        assign_parameters(module)
+
+
+def assign_parameters(obj):
+    global Max_bits_used, Max_bits_obj
+    for pb in obj.gen_param_blocks():
+        assign_param_names(obj, pb)
+    if obj.bits_used + 2 > Max_bits_used:
+        Max_bits_used = obj.bits_used + 2
+        Max_bits_obj = obj
+
+
+def assign_param_names(parent, param_block):
+    if param_block.optional:
+        param_block.C_kw_passed_mask = 1 << param_block.kw_passed_bit
+    else:
+        param_block.C_kw_passed_mask = 0
+    for p in param_block.optional_params:
+        p.C_param_mask = 1 << p.passed_bit
+
+
+Todo_lists = (
+    Assign_names,
+    Gen_step_code,
+    [start_output],
+    Module_instance_definitions,
+    Module_instance_declarations,
+    Label_descriptors,
+    Module_descriptors,
+    [write_module_instance_list, start_main],
+    Init_start_labels,
+    Set_module_descriptor_pointers,
+    Initialize_module_parameters,
+    [call_cycle_run],
+    Module_code,
+    [end_main, done],
+)
+
 
 
 Precedence = (  # highest to lowest
@@ -75,14 +294,20 @@ Reserved_words = frozenset((
 ))
 
 
-expr_unary = {
+def gen_abs(expr):
+    if expr.type.is_integer():
+        return f"abs({expr})"
+    return f"fabs({expr})"
+
+
+Unary_exprs = {
     'ABS': gen_abs,
     'NOT': partial(unary, '!', '!{}'),
     '-': partial(unary, 'UMINUS', '-{}'),
 }
 
 
-expr_binary = {
+Binary_exprs = {
     '.': partial(binary, '.', '{}.{}'),
     '^': partial(binary, ',', 'pow({}, {})', result_op='('),
     '*': partial(binary, '*', '{} * {}'),
@@ -107,13 +332,20 @@ expr_binary = {
 }
 
 
-types = {
+Types = {
     "float": "double",
     "integer": "long",
     "boolean": "char",
     "string": "char *",
     "module": "struct module_instance_s",
 }
+
+
+def translate_label_type(type):
+    return "struct label_descriptor_s *"
+
+
+#####################################################################
 
 
 def gen_program(opmode):
@@ -303,105 +535,6 @@ def gen_program(opmode):
 
         print("emit_code_end ....")
         emit_code_end()
-
-
-def assign_names(m):
-    # set C_global_name: globally unique name
-    if isinstance(m, symtable.Module):
-        m.C_global_name = \
-          "__".join((os.path.basename(os.path.dirname(m.filename)),
-                     translate_name(m.name))) + "__module"
-    else:
-        m.C_global_name = translate_name(m.name) + "__opmode"
-    m.C_descriptor_name = m.C_global_name + "__desc"
-    m.C_struct_name = m.C_global_name + "__instance_s"
-    m.C_init_sub_name = m.C_global_name + "__init__"
-    assign_child_names(m)
-
-
-def assign_child_names(module):
-    for obj in module.names.values():
-        if isinstance(obj, symtable.Variable):
-            # name defined inside namespace struct
-            obj.C_type = translate_type(obj.type)
-            obj.C_local_name = translate_name(obj.name.value)
-        elif isinstance(obj, symtable.Use):
-            # name defined inside namespace struct
-            obj.C_local_name = translate_name(obj.name.value)
-        elif isinstance(obj, symtable.Typedef):
-            obj.C_type = translate_type(obj.type)
-            # name defined globally
-            obj.C_global_name = \
-              module.C_global_name + "__" + translate_name(obj.name.value)
-        elif isinstance(obj, symtable.Labeled_block):
-            # unique inside module
-            obj.C_local_name = translate_name(obj.name.value)
-
-            obj.C_flags_name = obj.C_local_name + "__flags__"
-            if isinstance(obj, symtable.Subroutine):
-                obj.C_ret_pointer_name = obj.C_local_name + "__ret_pointer__"
-
-            # name defined globally
-            obj.C_global_name = module.C_global_name + "__" + obj.C_local_name
-
-            obj.C_descriptor_name = obj.C_global_name + "__desc__"
-            obj.C_label_name = obj.C_global_name + "__label__"
-            obj.C_dlt_mask_name = obj.C_local_name + "__dlt_mask__"
-            obj.needs_dlt_mask = False
-            obj.C_temps = []  # [(type, name)]
-            assign_parameters(obj)
-        else:
-            # This seems to only be References
-            if (True):
-                print("assign_child_names: ignoring",
-                      obj.__class__.__name__, obj.name.value, "in",
-                      module.__class__.__name__, module.name.value)
-
-    if not isinstance(module, symtable.Opmode):
-        assign_parameters(module)
-
-
-def assign_parameters(obj):
-    global Max_bits_used, Max_bits_obj
-    for pb in obj.gen_param_blocks():
-        assign_param_names(obj, pb)
-    if obj.bits_used + 2 > Max_bits_used:
-        Max_bits_used = obj.bits_used + 2
-        Max_bits_obj = obj
-
-
-def assign_param_names(parent, param_block):
-    if param_block.optional:
-        param_block.C_kw_passed_mask = 1 << param_block.kw_passed_bit
-    else:
-        param_block.C_kw_passed_mask = 0
-    for p in param_block.optional_params:
-        p.C_param_mask = 1 << p.passed_bit
-
-
-def translate_name(name):
-    if not name[-1].isdecimal() and not name[-1].isalpha():
-        return name[:-1].lower() + '_'
-    if name.lower() in Reserved_words:
-        return name.lower() + '_'
-    return name.lower()
-
-
-def translate_type(type):
-    if isinstance(type, symtable.Builtin_type):
-        return types[type.name.lower()]
-    if isinstance(type, symtable.Label_type):
-        return "struct label_pointer_s"
-    assert isinstance(type, symtable.Typename_type)
-    return translate_type(type.typedef.type)
-
-
-ret_struct_names = {
-    'FLOAT': 'fn_ret_f_s',
-    'INTEGER': 'fn_ret_i_s',
-    'STRING': 'fn_ret_s_s',
-    'BOOL': 'fn_ret_b_s',
-}
 
 
 def gen_descriptors(module):
@@ -804,43 +937,3 @@ def convert_call_fn(fn, arguments):
     print("convert_call_fn", fn, arguments)
     return (), "call_fn", 100, 'nonassoc'
 
-
-def tsort_modules(opmode):
-    r'''Generates modules in bottom-up order according to "uses".
-
-    opmode.modules_seen is {name: module}.
-    '''
-    for name, m in opmode.modules_seen.items():
-        assert name == m.name
-
-    # {parent: set(uses)}
-    order = dict(gen_dependencies(opmode))
-    #print("tsort_modules, order:", order)
-    for uses in order.values():
-        for use in uses:
-            assert use in order
-
-    builtins = opmode.modules_seen['builtins']
-
-    while order:
-        leaves = set(parent
-                     for parent, uses in order.items()
-                      if not uses)
-        if len(leaves) > 1 and builtins in leaves:
-            leaves.remove(builtins)
-        if len(leaves) > 1 and opmode in leaves:
-            leaves.remove(opmode)
-        for module in sorted(leaves, key=lambda m: m.name):
-            yield module
-            del order[module]
-        for uses in order.values():
-            uses -= leaves
-    #yield opmode
-
-
-def gen_dependencies(opmode):
-    modules_seen = opmode.modules_seen
-    all_modules = tuple(modules_seen.values()) + (opmode,)
-    for m in all_modules:
-        uses = set(modules_seen[x.module_name.value] for x in get_uses(m))
-        yield m, uses
