@@ -9,7 +9,7 @@ import symtable
 from scanner import Token, syntax_error
 from code_generator import (
     todo, todo_with_args, translate_name, translate_type, unary, binary,
-    subscript, relative_path,
+    subscript, relative_path, wrap,
 )
 
 
@@ -196,6 +196,7 @@ def assign_label_names(label, module):
     label.C_global_name = f"{module.C_global_name}__{label.C_local_name}"
     label.C_label_descriptor_name = label.C_global_name + "__desc"
     label.C_dlt_mask_name = f"{label.C_local_name}__dlt_mask"
+    label.code = label.C_label_descriptor_name
 
 
 @todo_with_args(symtable.Label, "prepare", Label_descriptors)
@@ -237,16 +238,17 @@ def write_label_descriptor(label, module):
           for p in pb.gen_parameters())
         print(f'        (void *[]){{{param_locations}}},   // param_locations',
               file=C_file)
-        var_set_masks = ", ".join(f"{1 << p.variable.set_bit}"
+        var_set_masks = ", ".join(hex(1 << p.variable.set_bit)
                                   for p in pb.gen_parameters())
         print(f'        (unsigned long []){{{var_set_masks}}},'
                 '// var_set_masks',
               file=C_file)
         if pb.optional:
-            print(f'        {1 << pb.kw_passed_bit},   // kw_mask', file=C_file)
+            print(f'        {hex(1 << pb.kw_passed_bit)},   // kw_mask',
+                  file=C_file)
         else:
             print('        0,   // kw_mask', file=C_file)
-        param_masks = ", ".join(f"{1 << p.passed_bit}"
+        param_masks = ", ".join(hex(1 << p.passed_bit)
                                 for p in pb.optional_params)
         print(f'        (unsigned long []){{{param_masks}}},'
                 '// param_masks',
@@ -269,68 +271,91 @@ def init_label(label, module):
 
 @symtable.Variable.as_post_hook("prepare")
 def assign_variable_names(var, module):
-    var.C_type = translate_type(var.type)
-    var.C_local_name = translate_name(var.name.value)
+    var.C_local_name = translate_name(var.name)
+    var.precedence, var.assoc = Precedence_lookup['.']
+    var.code = f"{var.parent_namespace.C_global_name}.{var.C_local_name}"
 
 
-def assign_child_names(module):
-    for obj in module.names.values():
-        if isinstance(obj, symtable.Variable):
-            # name defined inside namespace struct
-            obj.C_type = translate_type(obj.type)
-            obj.C_local_name = translate_name(obj.name.value)
-        elif isinstance(obj, symtable.Use):
-            # name defined inside namespace struct
-            obj.C_local_name = translate_name(obj.name.value)
-        elif isinstance(obj, symtable.Typedef):
-            obj.C_type = translate_type(obj.type)
-            # name defined globally
-            obj.C_global_name = \
-              module.C_global_name + "__" + translate_name(obj.name.value)
-        elif isinstance(obj, symtable.Labeled_block):
-            # unique inside module
-            obj.C_local_name = translate_name(obj.name.value)
-
-            obj.C_flags_name = obj.C_local_name + "__flags__"
-            if isinstance(obj, symtable.Subroutine):
-                obj.C_ret_pointer_name = obj.C_local_name + "__ret_pointer__"
-
-            # name defined globally
-            obj.C_global_name = module.C_global_name + "__" + obj.C_local_name
-
-            obj.C_descriptor_name = obj.C_global_name + "__desc__"
-            obj.C_label_name = obj.C_global_name + "__label__"
-            obj.C_dlt_mask_name = obj.C_local_name + "__dlt_mask__"
-            obj.needs_dlt_mask = False
-            obj.C_temps = []  # [(type, name)]
-            assign_parameters(obj)
-        else:
-            # This seems to only be References
-            if (True):
-                print("assign_child_names: ignoring",
-                      obj.__class__.__name__, obj.name.value, "in",
-                      module.__class__.__name__, module.name.value)
-
-    if not isinstance(module, symtable.Opmode):
-        assign_parameters(module)
-
-
-def assign_parameters(obj):
-    global Max_bits_used, Max_bits_obj
-    for pb in obj.gen_param_blocks():
-        assign_param_names(obj, pb)
-    if obj.bits_used + 2 > Max_bits_used:
-        Max_bits_used = obj.bits_used + 2
-        Max_bits_obj = obj
-
-
-def assign_param_names(parent, param_block):
-    if param_block.optional:
-        param_block.C_kw_passed_mask = 1 << param_block.kw_passed_bit
+@symtable.Literal.as_post_hook("prepare_step")
+def compile_literal(literal, module, last_label, last_fn_subr):
+    if isinstance(literal.value, (int, float)):
+        literal.code = repr(literal.value)
+    elif isinstance(literal.value, str):
+        escaped_str = literal.value.replace('"', r'\"')
+        literal.code = f'"{escaped_str}"'
     else:
-        param_block.C_kw_passed_mask = 0
-    for p in param_block.optional_params:
-        p.C_param_mask = 1 << p.passed_bit
+        assert isinstance(literal.value, bool)
+        literal.code = "1" if literal.value else "0"
+
+
+@symtable.Subscript.as_post_hook("prepare_step")
+def compile_subscript(subscript, module, last_label, last_fn_subr):
+    subscript.precedence, subscript.assoc = Precedence_lookup['[']
+    array_code = wrap(subscript.array_expr, subscript.precedence, 'left')
+    sub_code = subscript.subscript_expr.get_step().code
+    subscript.code = f"{array_code}[{sub_code}]"
+    # FIX: add subscript range check to end of prep_statements
+
+
+@symtable.Got_keyword.as_post_hook("prepare_step")
+def compile_got_keyword(self, module, last_label, last_fn_subr):
+    if self.immediate:
+        self.precedence = 100
+        self.assoc = None
+        self.code = "1" if self.value else "0"
+    else:
+        self.precedence, self.assoc = Precedence_lookup['&']
+        self.code = f"{self.label.C_label_descriptor_name}.params_passed" \
+                    f" & {hex(1 << self.bit_number)}"
+
+
+@symtable.Got_param.as_post_hook("prepare_step")
+def compile_got_param(self, module, last_label, last_fn_subr):
+    if self.immediate:
+        self.precedence = 100
+        self.assoc = None
+        self.code = "1" if self.value else "0"
+    else:
+        self.precedence, self.assoc = Precedence_lookup['&']
+        self.code = f"{self.label.C_label_descriptor_name}.params_passed" \
+                    f" & {hex(1 << self.bit_number)}"
+
+
+@symtable.Unary_expr.as_post_hook("prepare_step")
+def compile_unary_expr(self, module, last_label, last_fn_subr):
+    if self.immediate:
+        self.precedence = 100
+        self.assoc = None
+        if isinstance(self.value, bool):
+            self.code = "1" if self.value else "0"
+        else:
+            self.code = repr(self.value)
+    else:
+        self.precedence, self.assoc, self.code = \
+          Unary_exprs[self.operator](self.expr)
+
+
+@symtable.Binary_expr.as_post_hook("prepare_step")
+def compile_binary_expr(self, module, last_label, last_fn_subr):
+    if self.immediate:
+        self.precedence = 100
+        self.assoc = None
+        if isinstance(self.value, bool):
+            self.code = "1" if self.value else "0"
+        elif isinstance(self.value, (int, float)):
+            self.code = repr(self.value)
+        else:
+            escaped_str = self.value.replace('"', r'\"')
+            self.code = f'"{escaped_str}"'
+    else:
+        self.precedence, self.assoc, self.code = \
+          Binary_exprs[self.operator](self.expr1, self.expr2)
+
+
+@symtable.Return_label.as_post_hook("prepare_step")
+def compile_return_label(self, module, last_label, last_fn_subr):
+    self.precedence, self.assoc = Precedence_lookup['.']
+    self.code = f"{self.label.C_label_descriptor_name}.return_label"
 
 
 Todo_lists = (
@@ -408,9 +433,10 @@ Reserved_words = frozenset((
 
 
 def gen_abs(expr):
+    precedence, assoc = Precedence_lookup['(']
     if expr.type.is_integer():
-        return f"abs({expr})"
-    return f"fabs({expr})"
+        return precedence, assoc, f"abs({expr})"
+    return precedence, assoc, f"fabs({expr})"
 
 
 Unary_exprs = {
@@ -1003,7 +1029,7 @@ def gen_expr(expr):
     r'''Returns (statements,), C code, C precedence level, C associativity
     '''
     if isinstance(expr, str):
-        C_str = expr.replace('""', '\"')
+        C_str = expr.replace('""', r'\"')
         return (), f'"{C_str}"', 100, 'nonassoc'
     if isinstance(expr, (float, int)):
         return (), repr(expr), 100, 'nonassoc'

@@ -46,6 +46,7 @@ def init_code_generator(target_language, rootdir):
 
     # {operator: (precedence_level, assoc)}
     Precedence_lookup = parse_precedence(Target_language.Precedence)
+    target_language.Precedence_lookup = Precedence_lookup
 
 
 def relative_path(filename):
@@ -69,16 +70,20 @@ def parse_precedence(precedence):
 
 
 def wrap(expr, precedence, side):
-    if expr[2] > precedence or expr[2] == precedence and expr[3] == side:
-        return expr[1]
-    return f"({expr[1]})"
+    if expr.precedence > precedence or \
+       expr.precedence == precedence and expr.assoc == side:
+        return expr.code
+    return f"({expr.code})"
+
+
+def compile_unary(op, expr):
+    return Unary_exprs[op](expr)
 
 
 def unary(op, format, expr): 
     precedence, assoc = Precedence_lookup[op]
-    return (expr[0],
-            format.format(wrap(expr, precedence, 'right')),
-            precedence, assoc)
+    return (precedence, assoc,
+            format.format(wrap(expr, precedence, 'right')))
 
 
 def binary(op, format, left_expr, right_expr, *, result_op=None): 
@@ -87,17 +92,16 @@ def binary(op, format, left_expr, right_expr, *, result_op=None):
         result_prec, result_assoc = precedence, assoc
     else:
         result_prec, result_assoc = Precedence_lookup(result_op)
-    return (left_expr[0] + right_expr[0],
+    return (result_prec, result_assoc,
             format.format(wrap(left_expr, precedence, 'left'),
-                          wrap(right_expr, precedence, 'right')),
-            result_precedence, result_assoc)
+                          wrap(right_expr, precedence, 'right')))
 
 
 def subscript(left, right):
+    # range checking must be done somewhere else...
     precedence, assoc = Precedence_lookup['[']
-    return (f"subscript({wrap(left, precedence, assoc)}, {right[0]}, "
-              f"{left.dim()})",
-            precedence, assoc)
+    return (precedence, assoc,
+            f"{wrap(left, precedence, 'left')}[{right.code}]")
 
 
 def translate_name(name):

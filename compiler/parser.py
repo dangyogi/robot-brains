@@ -53,8 +53,6 @@ def p_empty_tuple(p):
 
 def p_first(p):
     '''
-    native_element : primary
-                   | NATIVE_STRING_LIT
     native_line : native_elements newlines
     const_expr : STRING_LIT
                | FLOAT_LIT
@@ -143,6 +141,16 @@ def p_append(p):
     native_elements : native_elements native_element
     '''
     p[0] = p[1] + (p[2],)
+
+
+def p_native_element1(p):
+    'native_element : primary'
+    p[0] = ('expr', p[1])
+
+
+def p_native_element2(p):
+    'native_element : NATIVE_STRING_LIT'
+    p[0] = ('native_string', p[1])
 
 
 def p_actions(p):

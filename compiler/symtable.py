@@ -146,6 +146,8 @@ class Variable(Entity):
     dimensions = ()   # (int, ...)
     immediate = False
     constant = False
+    prep_statements = ()
+    vars_used = frozenset()
 
     def __init__(self, ident, namespace=None, **kws):
         Entity.__init__(self, ident, namespace)
@@ -165,6 +167,7 @@ class Variable(Entity):
         super().do_prepare(module)
         if not self.dimensions:
             self.set_bit = module.next_set_bit
+            self.vars_used = frozenset((self,))
             module.next_set_bit += 1
         self.type.prepare(module)
 
@@ -200,11 +203,15 @@ class Required_parameter(Symtable):
     self.passed_bit is bit number in label.params_passed
     self.param_pos_number assigned in Param_block.add_parameter.
     '''
-    def __init__(self, ident):
+    def __init__(self, ident, label=None):
         self.name = ident
-        self.variable = current_namespace().make_variable(ident)
+        if label is None:
+            self.variable = current_namespace().make_variable(ident)
+            Last_parameter_obj.pos_parameter(self)
+        else:
+            self.variable = label.parent_namespace.make_variable(ident)
+            label.pos_parameter(self)
         self.variable.parameter_list.append(self)
-        Last_parameter_obj.pos_parameter(self)
 
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.name.value}>"
@@ -1142,14 +1149,39 @@ class Step(Symtable):
 
 class Label(With_parameters, Step, Entity):
     immediate = True
+    prep_statements = ()
+    vars_used = frozenset()
+    precedence = 100
+    assoc = None
 
     def __init__(self, ident, namespace=None, hidden=False):
         Entity.__init__(self, ident, namespace)
         With_parameters.__init__(self)
         self.hidden = hidden
         self.temps = defaultdict(set)   # {type: {var}}
-        self.last_temp_number = 0
+        self.last_temp_number = 0       # to make temp variable names unique
+        self.last_label_number = 0      # to make new label names unique
         self.needs_dlt_mask = False
+
+    def new_label(self, module):
+        self.last_label_number += 1
+        ident = scanner.Token.dummy(
+                      f"__{self.name.value}__dummy_{self.last_label_number}")
+        ans = Label(ident, namespace=module, hidden=True)
+        return ans
+
+    def new_subr_ret_label(self, module):
+        r'Create, prepare and return a new dummy subroutine return label.'
+        ans = self.new_label(module)
+        ans.prepare(module)
+        return ans
+
+    def new_fn_ret_label(self, module, var_to_set):
+        r'Create, prepare and return a new dummy function return label.'
+        ans = self.new_label(module)
+        param = Required_parameter(var_to_set.name, ans)
+        ans.prepare(module)
+        return ans
 
     def do_prepare(self, module):
         #print(self.__class__.__name__, "do_prepare", self.name)
@@ -1172,13 +1204,14 @@ class Label(With_parameters, Step, Entity):
         self.temps_taken = set()  # {var}
 
     def get_temp(self, type):
+        r'Returns prepared Variable of `type`.'
         available_vars = self.temps[type.get_type()] - self.temps_taken
         if available_vars:
             ans = available_vars.pop()
         else:
             self.last_temp_number += 1
             ans = Variable(
-                    Dummy_token(
+                    scanner.Token.dummy(
                       f"__{self.name.value}__temp_{self.last_temp_number}"),
                     self.parent_namespace,
                     type=type)
@@ -1212,23 +1245,52 @@ class Function(Subroutine):
         print(f" return_types {self.return_types}", end='', file=f)
 
 
-class Native_subroutine(With_parameters, Entity):
+class Native_subroutine(With_parameters, Step, Entity):
     def __init__(self, ident):
         Entity.__init__(self, ident)
         With_parameters.__init__(self)
 
     def add_lines(self, lines):
+        # lines is ((element, ...), ...)
+        #
+        # where element is either ('expr', expr) or ('native_string', str)
         self.lines = lines
 
     def do_prepare(self, module):
         super().do_prepare(module)
+        assert self.parent_namespace == module
         self.type = Label_type(self.__class__.__name__,
                                self.as_taking_blocks(),
                                self.get_return_types())
         self.type.prepare(module)
 
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        prep_statements = []
+        self.vars_used = set()
+        for line in self.lines:
+            for element in line:
+                if element[0] == 'expr':
+                    element[1].prepare_step(module, None, None)
+                    prep_statements.extend(element[1].prep_statements)
+                    self.vars_used.update(element[1].vars_used)
+        self.prep_statements = tuple(prep_statements)
+
     def get_return_types(self):
         return None
+
+    def expand_lines(self):
+        r'''Returns a tuple of code strings.
+        '''
+        self.prepare_step(self.parent_namespace, None, None)
+        def expand_element(element):
+            if element[0] == 'native_string':
+                return element[1]
+            else:
+                return element[1].code
+        def expand_line(line):
+            return ''.join(expand_element(element) for element in line)
+        return tuple(expand_line(line) for line in self.lines)
 
 
 class Native_function(Native_subroutine):
@@ -1245,6 +1307,13 @@ class Native_function(Native_subroutine):
     def do_prepare(self, module):
         super().do_prepare(module)
         self.return_type.prepare(module)
+
+    def gen_code(self):
+        r'Returns prep_statements, vars_used, code.'
+        code_lines = self.expand_lines()
+        return (self.prep_statements + code_lines[:-1],
+                self.vars_used,
+                f"({code_lines[-1]})")
 
 
 class Statement(Step):
@@ -1640,6 +1709,8 @@ class DLT(Step):
 
 class Expr(Step):
     immediate = False   # True iff value known at compile time
+    vars_used = frozenset()
+    prep_statements = ()
 
     def __init__(self, lexpos, lineno):
         self.lexpos = lexpos
@@ -1668,6 +1739,8 @@ class Expr(Step):
 
 class Literal(Expr):
     immediate = True
+    precedence = 100
+    assoc = None
 
     def __init__(self, lexpos, lineno, value):
         Expr.__init__(self, lexpos, lineno)
@@ -1686,7 +1759,7 @@ class Literal(Expr):
 
 
 class Reference(Expr):
-    r'''An IDENT that references either a Variable or a Label.
+    r'''An IDENT that references either a Variable, Label or Native_subroutine.
 
     Type IDENTs are converted to Typename_types rather than References.
     '''
@@ -1708,6 +1781,12 @@ class Reference(Expr):
         self.referent = lookup(self.ident, module)
         self.type = self.referent.type
         #print("Reference", self.ident, "found", self.referent)
+        if isinstance(self.referent.get_step(), (Variable, Label)):
+            self.prep_statements = self.referent.get_step().prep_statements
+            self.vars_used = self.referent.get_step().vars_used
+            self.precedence = self.referent.get_step().precedence
+            self.assoc = self.referent.get_step().assoc
+            self.code = self.referent.get_step().code
 
 
 class Dot(Expr):
@@ -1730,9 +1809,30 @@ class Dot(Expr):
                                  self.expr.filename)
         self.referent = self.expr.get_step().value.lookup(self.ident)
         self.type = self.referent.type
-        if self.referent.get_step().immediate:
+        step = self.referent.get_step()
+        if step.immediate:
             self.immediate = True
-            self.value = self.referent.get_step().value
+            self.value = step.value
+
+    @property
+    def prep_statements(self):
+        return self.referent.get_step().prep_statements
+
+    @property
+    def vars_used(self):
+        return self.referent.get_step().vars_used
+
+    @property
+    def precedence(self):
+        return self.referent.get_step().precedence
+
+    @property
+    def assoc(self):
+        return self.referent.get_step().assoc
+
+    @property
+    def code(self):
+        return self.referent.get_step().code
 
 
 class Subscript(Expr):
@@ -1749,6 +1849,16 @@ class Subscript(Expr):
         self.array_expr.prepare_step(module, last_label, last_fn_subr)
         self.subscript_expr.prepare_step(module, last_label, last_fn_subr)
         self.type = self.array_expr.type
+
+    @property
+    def prep_statements(self):
+        return self.array_expr.get_step().prep_statements \
+             + self.subscript_expr.get_step().prep_statements
+
+    @property
+    def vars_used(self):
+        return self.array_expr.get_step().vars_used.union(
+                 self.subscript_expr.get_step().vars_used)
 
 
 class Got_keyword(Expr):
@@ -1831,6 +1941,9 @@ class Got_param(Expr):
 
 
 class Call_fn(Expr):
+    precedence = 100
+    assoc = None
+
     def __init__(self, fn, pos_arguments, kw_arguments):
         Expr.__init__(self, fn.lexpos, fn.lineno)
         self.fn = fn
@@ -1846,6 +1959,8 @@ class Call_fn(Expr):
         # self.type has to be done for each instance...
         super().do_prepare_step(module, last_label, last_fn_subr)
         self.fn.prepare_step(module, last_label, last_fn_subr)
+        prep_statements = list(self.fn.prep_statements).copy()
+        self.vars_used = set(self.fn.vars_used).copy()
         fn_type = self.fn.type.get_type()
         if not isinstance(fn_type, Label_type) or \
            fn_type.label_type not in ('function', 'native_function') or \
@@ -1857,12 +1972,27 @@ class Call_fn(Expr):
                                  self.fn.filename)
         for expr in self.pos_arguments:
             expr.prepare_step(module, last_label, last_fn_subr)
+            prep_statements.extend(expr.prep_statements)
+            self.vars_used.update(expr.vars_used)
         for _, pos_arguments in self.kw_arguments:
             for expr in pos_arguments:
                 expr.prepare_step(module, last_label, last_fn_subr)
+                prep_statements.extend(expr.prep_statements)
+                self.vars_used.update(expr.vars_used)
         fn_type.satisfied_by_arguments(self.fn, self.pos_arguments,
                                        self.kw_arguments)
         self.type = fn_type.return_types[0][0][0]
+        if isinstance(self.fn.get_step(), Native_function):
+            native_prep_statements, native_vars_used, self.code = \
+              self.fn.get_step().gen_code()
+            prep_statements.extend(native_prep_statements)
+            self.vars_used.update(native_vars_used)
+        else:
+            temp_var = last_label.get_temp(self.type)
+            self.code = temp_var.code
+            ret_label = last_label.new_fn_ret_label(module, temp_var)
+            # FIX: add call and label to end of prep_statements
+        self.prep_statements = tuple(prep_statements)
 
 
 class Unary_expr(Expr):
@@ -1900,6 +2030,14 @@ class Unary_expr(Expr):
                 self.value = not self.expr.get_step().value
         else:
             raise AssertionError(f"Unknown operator {self.operator}")
+
+    @property
+    def prep_statements(self):
+        return self.expr.get_step().prep_statements
+
+    @property
+    def vars_used(self):
+        return self.expr.get_step().vars_used
 
 
 class Binary_expr(Expr):
@@ -2004,6 +2142,16 @@ class Binary_expr(Expr):
             self.value = immed_fn(self.expr1.get_step().value,
                                   self.expr2.get_step().value)
 
+    @property
+    def prep_statements(self):
+        return self.expr1.get_step().prep_statements \
+             + self.expr2.get_step().prep_statements
+
+    @property
+    def vars_used(self):
+        return self.expr1.get_step().vars_used.union(
+                 self.expr2.get_step().vars_used)
+
 
 class Return_label(Expr):
     def __init__(self, lexpos, lineno, label=None):
@@ -2045,12 +2193,4 @@ def lookup(ident, module):
         return obj
     scanner.syntax_error("Not found",
                          ident.lexpos, ident.lineno, ident.filename)
-
-
-class Dummy_token:
-    def __init__(self, value):
-        self.value = value
-        self.lexpos = None
-        self.lineno = None
-        self.filename = None
 

@@ -36,6 +36,11 @@ class Token:
         else:
             self.filename = filename
 
+    @classmethod
+    def dummy(cls, value, type='integer'):
+        return cls(None, value=value, type=type, lexpos=0, lineno=1,
+                   filename='dummy')
+
     def __repr__(self):
         return (f"<Token {self.value!r}"
                 #f" lineno={self.lineno} lexpos={self.lexpos}"
