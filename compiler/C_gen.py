@@ -4,6 +4,7 @@ import sys
 import os.path
 import operator
 from functools import partial
+from itertools import groupby
 
 import symtable
 from scanner import Token, syntax_error
@@ -136,7 +137,6 @@ def write_module_descriptor(m):
     else:
         print('    NULL,   // module_params', file=C_file)
     print('    0,   // vars_set', file=C_file)
-    print('    0,   // lineno', file=C_file)
     labels = tuple(label for label in m.filter(symtable.Label)
                          if not label.hidden)
     print(f'    {len(labels)},   // num_labels', file=C_file)
@@ -172,21 +172,81 @@ def write_module_code(module):
         step.write_code(module)
 
 
-def write_label_code(label, module):
-    print(f"  {label.C_global_name}:", file=C_file)
+def write_label_code(label, module, extra_indent=0):
+    print(' ' * extra_indent, f"  {label.code}", sep='', file=C_file)
 symtable.Label.write_code = write_label_code
 
 
-def write_statement_code(label, module):
+def write_statement_code(self, module, extra_indent=0):
+    print(' ' * extra_indent,
+          f"    {self.containing_label.C_label_descriptor_name}.lineno"
+            f" = {self.lineno};",
+          sep='', file=C_file)
+    check_all_vars_used(self.containing_label, self.vars_used, extra_indent)
+    for line in self.prep_statements:
+        print(' ' * extra_indent, "    ", line, sep='', file=C_file)
+    print(' ' * extra_indent, "    // FIX: Implement", sep='', file=C_file)
     # FIX: Implement
-    print("    // FIX statement", file=C_file)
+    for line in self.post_statements:
+        print(' ' * extra_indent, "    ", line, sep='', file=C_file)
 symtable.Statement.write_code = write_statement_code
 
 
-def write_dlt_code(label, module):
-    # FIX: Implement
-    print(f"    // FIX DLT", file=C_file)
+def check_all_vars_used(containing_label, vars_used, extra_indent):
+    for vars_module, module_vars_used \
+     in groupby(sorted(vars_used,
+                       key=lambda v: (id(v.parent_namespace), v.set_bit)),
+                key=lambda v: v.parent_namespace):
+        check_vars_used(containing_label, vars_module, module_vars_used,
+                        extra_indent)
+
+
+def check_vars_used(label, vars_module, vars_used, extra_indent):
+    vars_used = tuple(vars_used)
+    mask = sum(1 << v.set_bit for v in vars_used)
+    bits_set = f"{vars_module.C_descriptor_name}.vars_set & {hex(mask)}"
+    print(' ' * extra_indent, f"    if ({bits_set} != {hex(mask)}) {{",
+          sep='', file=C_file)
+    print(' ' * extra_indent,
+          f"        report_var_not_set(&{label.C_label_descriptor_name},",
+          sep='', file=C_file)
+    print(' ' * extra_indent,
+          f"                           {bits_set}, {hex(mask)},",
+          sep='', file=C_file)
+    var_names = ', '.join(f'"{v.name.value}"' for v in vars_used)
+    print(' ' * extra_indent, f"                           {var_names});",
+          sep='', file=C_file)
+    print(' ' * extra_indent, "    }", sep='', file=C_file)
+
+
+def write_dlt_code(self, module, extra_indent=0):
+    label = self.conditions.containing_label
+    print(' ' * extra_indent, f"    {label.C_label_descriptor_name}.lineno"
+            f" = {self.conditions.lineno};",
+          sep='', file=C_file)
+    check_all_vars_used(label, self.conditions.vars_used, extra_indent)
+    for line in self.conditions.prep_statements:
+        print(' ' * extra_indent, "    ", line, sep='', file=C_file)
+    dlt_mask = f"{module.C_global_name}.{label.C_dlt_mask_name}"
+    print(' ' * extra_indent, f"    {dlt_mask} = 0;", sep='', file=C_file)
+    for i, expr in enumerate(reversed(self.conditions.exprs)):
+        print(' ' * extra_indent, f"    if ({expr.code}) {{",
+              sep='', file=C_file)
+        print(' ' * extra_indent, f"        {dlt_mask} |= {hex(1 << i)};",
+              sep='', file=C_file)
+        print(' ' * extra_indent, "    }", sep='', file=C_file)
+    print(' ' * extra_indent, f"    switch ({dlt_mask}) {{",
+          sep='', file=C_file)
+    for action in self.actions.actions:
+        action.write_code(module, extra_indent + 4)
+    print(' ' * extra_indent, "    }", sep='', file=C_file)
 symtable.DLT.write_code = write_dlt_code
+
+
+def write_dlt_map_code(self, module, extra_indent=0):
+    for mask in self.masks:
+        print(' ' * extra_indent, f"case {hex(mask)}:", sep='', file=C_file)
+symtable.DLT_MAP.write_code = write_dlt_map_code
 
 
 @symtable.Label.as_pre_hook("prepare")
@@ -196,7 +256,7 @@ def assign_label_names(label, module):
     label.C_global_name = f"{module.C_global_name}__{label.C_local_name}"
     label.C_label_descriptor_name = label.C_global_name + "__desc"
     label.C_dlt_mask_name = f"{label.C_local_name}__dlt_mask"
-    label.code = label.C_label_descriptor_name
+    label.code = label.C_global_name + ':'
 
 
 @todo_with_args(symtable.Label, "prepare", Label_descriptors)
@@ -256,6 +316,7 @@ def write_label_descriptor(label, module):
         print("      },", file=C_file)
     print('    },', file=C_file)
     print('    0,   // params_passed', file=C_file)
+    print('    0,   // lineno', file=C_file)
     print("};", file=C_file)
 
 

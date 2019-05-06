@@ -12,6 +12,7 @@ Descriptors:
     * unsigned long params_passed   // one bit per var
       - has param_passed and kw_passed bits
       - has one running bit for subroutines and functions
+    - unsigned long lineno
     * label_descriptor *return_label
       - for subroutines and functions
     * module_descriptor *module;     // set in label init
@@ -45,7 +46,6 @@ Descriptors:
     - label_descriptor *module_params
     - unsigned long vars_set        // one bit per var
       - init to 0 outside of main
-    - unsigned long lineno
     - int num_labels
     - label_descriptor *labels[]    // initialized as {&label_desc, ...}
 

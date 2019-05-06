@@ -671,7 +671,7 @@ def p_action2(p):
 
 def p_dlt_conditions(p):
     'dlt_conditions : conditions'
-    p[0] = Conditions(p[1])
+    p[0] = Conditions(p.lineno(1), p[1])
 
 
 def p_dlt_actions(p):

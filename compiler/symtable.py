@@ -1351,6 +1351,8 @@ class Statement(Step):
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
+        assert last_label is not None
+        self.containing_label = last_label
         prep_statements = []
         self.vars_used = set()
         def _prepare(obj):
@@ -1492,14 +1494,18 @@ class Done_statement(Statement):
 class Conditions(Step):
     r'''DLT conditions section.
 
+    Mask bits are assigned from bottom up, i.e., the last expr in the
+    Conditions block is bit 0 (0x1).
+
     self.exprs is condition expressions in order from MSB to LSB in the mask.
     self.num_columns is the number of columns in the DLT.
     self.offset is the number of spaces between the '|' and the first column.
     self.column_masks has one list of masks for each column.
     self.dlt_mask is the dlt_mask Token (for future syntax errors).
     '''
-    def __init__(self, conditions):
+    def __init__(self, lineno, conditions):
         r'conditions is ((mask, expr), ...)'
+        self.lineno = lineno
         self.compile_conditions(conditions)
 
     def compile_conditions(self, conditions):
@@ -1585,7 +1591,7 @@ class Conditions(Step):
                         for i in range(self.num_columns - 1, -1, -1)])
 
     def sync_actions(self, actions):
-        missing_columns = actions.apply_offset(self.offset, self.num_columns)
+        missing_columns = actions.apply_offset(self)
         if missing_columns:
             scanner.syntax_error("Missing action for this column",
                                  self.dlt_mask.lexpos + missing_columns[0],
@@ -1594,16 +1600,26 @@ class Conditions(Step):
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
+        assert last_label is not None
+        self.containing_label = last_label
+        last_label.need_dlt_mask()
+        prep_statements = []
+        self.vars_used = set()
         for expr in self.exprs:
             expr.prepare_step(module, last_label, last_fn_subr)
-        for expr in self.exprs:
             if not expr.is_boolean():
                 scanner.syntax_error("Must be boolean expression",
                                      expr.lexpos, expr.lineno, expr.filename)
+            self.vars_used.update(expr.vars_used)
+            prep_statements.extend(expr.prep_statements)
+        self.prep_statements = tuple(prep_statements)
 
 
 class DLT_MAP(Step):
     r'''self.map is a Token whose value is the "X X..." map.
+    self.column_numbers is a list of column numbers (leftmost column position
+    starting at 0).
+    self.masks is a list of the matching masks.
     '''
     def __init__(self, map):
         self.map = map
@@ -1627,7 +1643,7 @@ class DLT_MAP(Step):
                                          self.map.lexpos + i, self.map.lineno)
                 self.column_numbers.append(i)
 
-    def apply_offset(self, offset, num_columns):
+    def apply_offset(self, conditions):
         r'''Subtracts offset from each column_number in self.column_numbers.
 
         Checks that all column_numbers are >= offset and resulting
@@ -1635,6 +1651,8 @@ class DLT_MAP(Step):
 
         Returns a list of the resulting column_numbers.
         '''
+        offset = conditions.offset
+        num_columns = conditions.num_columns
         for i in range(len(self.column_numbers)):
             if self.column_numbers[i] < offset or \
                self.column_numbers[i] - offset >= num_columns:
@@ -1643,6 +1661,9 @@ class DLT_MAP(Step):
                                      self.map.lexpos + self.column_numbers[i],
                                      self.map.lineno)
             self.column_numbers[i] -= offset
+        self.masks = sorted(chain.from_iterable(
+                              conditions.column_masks[column_number]
+                              for column_number in self.column_numbers))
         return self.column_numbers
 
     def dump_details(self, f):
@@ -1672,7 +1693,7 @@ class Actions(Step):
     def is_final(self):
         return self.final
 
-    def apply_offset(self, offset, num_columns):
+    def apply_offset(self, conditions):
         r'''Subtracts offset from each column_number in self.actions.
 
         Checks that all column_numbers are >= offset and resulting
@@ -1683,10 +1704,10 @@ class Actions(Step):
         seen = set()
         for action in self.actions:
             if isinstance(action, DLT_MAP):
-                seen.update(action.apply_offset(offset, num_columns))
+                seen.update(action.apply_offset(conditions))
 
         # Return missing column_numbers.
-        ans = sorted(frozenset(range(num_columns)) - seen)
+        ans = sorted(frozenset(range(conditions.num_columns)) - seen)
         return ans
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
