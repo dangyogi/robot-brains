@@ -120,15 +120,18 @@ class Symtable(Hook_base):
 class Entity(Symtable):
     r'''Named entities within a namespace.
     '''
-    def __init__(self, ident):
+    def __init__(self, ident, namespace=None):
         self.name = ident
-        self.set_in_namespace()
+        self.set_in_namespace(namespace)
 
     def __repr__(self):
         return f"<{self.__class__.__name__} {self.name.value}>"
 
-    def set_in_namespace(self):
-        self.parent_namespace = current_namespace()
+    def set_in_namespace(self, namespace=None):
+        if namespace is None:
+            self.parent_namespace = current_namespace()
+        else:
+            self.parent_namespace = namespace
         self.parent_namespace.set(self.name, self)
 
     def dump_details(self, f):
@@ -144,8 +147,8 @@ class Variable(Entity):
     immediate = False
     constant = False
 
-    def __init__(self, ident, **kws):
-        Entity.__init__(self, ident)
+    def __init__(self, ident, namespace=None, **kws):
+        Entity.__init__(self, ident, namespace)
         self.lexpos = ident.lexpos
         self.lineno = ident.lineno
         self.filename = ident.filename
@@ -923,7 +926,7 @@ class Opmode(Namespace):
         global Opmode_module
         Opmode_module = self
 
-    def set_in_namespace(self):
+    def set_in_namespace(self, namespace=None):
         pass
 
     #def dump_details(self, f):
@@ -1101,6 +1104,7 @@ class Module(With_parameters, Opmode):
             elif isinstance(step, Label) and not step.hidden:
                 last_label = step
             assert last_label is not None
+            last_label.reset()  # makes all temps available again
             step.prepare_step(self, last_label, last_fn_subr)
             if next_step is None or isinstance(next_step, Label):
                 if not step.is_final():
@@ -1139,10 +1143,13 @@ class Step(Symtable):
 class Label(With_parameters, Step, Entity):
     immediate = True
 
-    def __init__(self, ident, hidden=False):
-        Entity.__init__(self, ident)
+    def __init__(self, ident, namespace=None, hidden=False):
+        Entity.__init__(self, ident, namespace)
         With_parameters.__init__(self)
         self.hidden = hidden
+        self.temps = defaultdict(set)   # {type: {var}}
+        self.last_temp_number = 0
+        self.needs_dlt_mask = False
 
     def do_prepare(self, module):
         #print(self.__class__.__name__, "do_prepare", self.name)
@@ -1160,6 +1167,28 @@ class Label(With_parameters, Step, Entity):
 
     def is_final(self):
         return False
+
+    def reset(self):
+        self.temps_taken = set()  # {var}
+
+    def get_temp(self, type):
+        available_vars = self.temps[type.get_type()] - self.temps_taken
+        if available_vars:
+            ans = available_vars.pop()
+        else:
+            self.last_temp_number += 1
+            ans = Variable(
+                    Dummy_token(
+                      f"__{self.name.value}__temp_{self.last_temp_number}"),
+                    self.parent_namespace,
+                    type=type)
+            ans.prepare(self.parent_namespace)
+            self.temps[type.get_type()].add(ans)
+        self.temps_taken.add(ans)
+        return ans
+
+    def need_dlt_mask(self):
+        self.needs_dlt_mask = True
 
 
 class Subroutine(Label):
@@ -2016,4 +2045,12 @@ def lookup(ident, module):
         return obj
     scanner.syntax_error("Not found",
                          ident.lexpos, ident.lineno, ident.filename)
+
+
+class Dummy_token:
+    def __init__(self, value):
+        self.value = value
+        self.lexpos = None
+        self.lineno = None
+        self.filename = None
 

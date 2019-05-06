@@ -96,7 +96,6 @@ def assign_module_names(m):
     m.C_struct_name = m.C_global_name + "__instance_s"
 
     # list of fns that write elements into the module struct definition
-    m.module_instance_elements = []
 
 
 @todo_with_args(symtable.Opmode, "prepare_module", Module_instance_definitions)
@@ -104,8 +103,13 @@ def write_module_instance_definition(module):
     print(file=C_file)
     print(f"struct {module.C_struct_name} {{", file=C_file)
     print("    struct module_descriptor_s *descriptor;", file=C_file)
-    for element in module.module_instance_elements:
-        element()
+    for var in module.filter(symtable.Variable):
+        dims = ''.join(f"[{d}]" for d in var.dimensions)
+        print(f"    {translate_type(var.type)} {var.C_local_name}{dims};",
+              file=C_file)
+    for label in module.filter(symtable.Label):
+        if label.needs_dlt_mask:
+            print(f"    unsigned long {label.C_dlt_mask_name};", file=C_file)
     print("};", file=C_file)
 
 
@@ -133,10 +137,10 @@ def write_module_descriptor(m):
         print('    NULL,   // module_params', file=C_file)
     print('    0,   // vars_set', file=C_file)
     print('    0,   // lineno', file=C_file)
-    labels = tuple(m.filter(symtable.Label))
+    labels = tuple(label for label in m.filter(symtable.Label)
+                         if not label.hidden)
     print(f'    {len(labels)},   // num_labels', file=C_file)
     print('    {   // labels', file=C_file)
-    print("write_module_descriptor", m.C_global_name, len(m.names))
     for label in labels:
         print(f"      &{label.C_label_descriptor_name},", file=C_file)
     print('    }', file=C_file)
@@ -162,12 +166,36 @@ def write_module_label_descriptor(module):
     write_label_descriptor(module, module)
 
 
+@todo_with_args(symtable.Module, "prepare_module", Module_code)
+def write_module_code(module):
+    for step in module.steps:
+        step.write_code(module)
+
+
+def write_label_code(label, module):
+    print(f"  {label.C_global_name}:", file=C_file)
+symtable.Label.write_code = write_label_code
+
+
+def write_statement_code(label, module):
+    # FIX: Implement
+    print("    // FIX statement", file=C_file)
+symtable.Statement.write_code = write_statement_code
+
+
+def write_dlt_code(label, module):
+    # FIX: Implement
+    print(f"    // FIX DLT", file=C_file)
+symtable.DLT.write_code = write_dlt_code
+
+
 @symtable.Label.as_pre_hook("prepare")
 def assign_label_names(label, module):
     # set C_global_name: globally unique name
-    label.C_global_name = \
-          f"{module.C_global_name}__{translate_name(label.name)}__label"
+    label.C_local_name = f"{translate_name(label.name)}__label"
+    label.C_global_name = f"{module.C_global_name}__{label.C_local_name}"
     label.C_label_descriptor_name = label.C_global_name + "__desc"
+    label.C_dlt_mask_name = f"{label.C_local_name}__dlt_mask"
 
 
 @todo_with_args(symtable.Label, "prepare", Label_descriptors)
@@ -239,22 +267,10 @@ def init_label(label, module):
       file=C_file)
 
 
-@todo_with_args(symtable.Label, "prepare", Module_code)
-def gen_label(label, module):
-    print(f"  {label.C_global_name}:", file=C_file)
-
-
 @symtable.Variable.as_post_hook("prepare")
 def assign_variable_names(var, module):
     var.C_type = translate_type(var.type)
     var.C_local_name = translate_name(var.name.value)
-    module.module_instance_elements.append(partial(gen_var_field, var, module))
-
-
-def gen_var_field(var, module):
-    dims = ''.join(f"[{d}]" for d in var.dimensions)
-    print(f"    {translate_type(var.type)} {var.C_local_name}{dims};",
-          file=C_file)
 
 
 def assign_child_names(module):

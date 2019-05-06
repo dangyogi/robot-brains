@@ -28,9 +28,10 @@
   - self.prepare(self)
   - for each Use object:
     - prepare_used_module(self)
-  - Module.do_prepare_module() does (in addition):
+  - Module.do_prepare_module() also does:
     - set param.variable.constant = True on all module parameters
     - call prepare_step(self, last_label, last_fn_subr) on each step
+      - call last_label.reset() prior to each call
     - reports syntax error on final statement errors
       - last step, and last step before label must be is_final()
       - all other steps must not be is_final()

@@ -682,9 +682,10 @@ parser = yacc.yacc()  # (start='opmode')
 def parse_opmode(filename, debug=False):
     global Rootdir
 
-    dirname = os.path.dirname(filename)
+    full_name = os.path.abspath(filename)
+    dirname = os.path.dirname(full_name)
     path = [dirname]
-    Rootdir = os.path.dirname(os.path.abspath(dirname))
+    Rootdir = os.path.dirname(dirname)
     libsdir = os.path.join(Rootdir, "libs")
     if os.path.isdir(libsdir):
         for entry in os.scandir(libsdir):
@@ -700,7 +701,7 @@ def parse_opmode(filename, debug=False):
         assert ans is not None
         return ans
 
-    ans = parse(filename, 'opmode', debug)
+    ans = parse(full_name, 'opmode', debug)
 
     # always parse 'builtins' module
     full_name = _find_module('builtins', path)
