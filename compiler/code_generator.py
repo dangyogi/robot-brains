@@ -123,25 +123,3 @@ def translate_type(type):
     assert isinstance(type, symtable.Typename_type)
     return translate_type(type.typedef.type)
 
-
-def convert_token(token):
-    # FIX
-    print("convert_atom", token)
-    return (), token.value, 100, 'nonassoc'
-
-
-def convert_unary(oper, expr):
-    print("convert_unary", oper, expr)
-    return expr_unary[oper](oper, expr)
-
-
-def convert_binary(left_expr, oper, right_expr):
-    print("convert_binary", left_expr, oper, right_expr)
-    return expr_binary[oper](left_expr, oper, right_expr)
-
-
-def convert_call_fn(fn, arguments):
-    # FIX
-    print("convert_call_fn", fn, arguments)
-    return (), "call_fn", 100, 'nonassoc'
-
