@@ -1,8 +1,11 @@
-// memcpy
-#include <string.h>
-
-// math
+#include <stdio.h>
 #include <math.h>
+
+// varargs
+#include <stdarg.h>
+
+// exit
+#include <stdlib.h>
 
 
 struct label_descriptor_s {
@@ -61,4 +64,33 @@ struct module_descriptor_s {      // initialized outside main
 
 
 #define FLAG_RUNNING            0x01
+
+
+void
+report_var_not_set(struct label_descriptor_s *label,
+                   unsigned long got, unsigned long expected, ...)
+{
+    va_list valist;
+    int num_errors = 0;
+
+    va_start(valist, expected);
+
+    while (expected) {
+        if (expected & 1) {
+            char *var_name = va_arg(valist, char *);
+            if (!(got & 1)) {
+                fprintf(stderr, "%s[%lu]: Variable (%s) not set\n", 
+                        label->module->name, label->lineno, var_name);
+                num_errors += 1;
+            }
+        }
+        expected >> 1;
+        got >> 1;
+    }
+
+    va_end(valist);
+    if (num_errors) {
+        exit(1);
+    }
+}
 
