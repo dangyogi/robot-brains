@@ -1317,6 +1317,8 @@ class Native_function(Native_subroutine):
 
 
 class Statement(Step):
+    post_statements = ()
+
     arguments = {
         'continue': (),
         'set': ('lvalue', 'expr'),
@@ -1349,13 +1351,18 @@ class Statement(Step):
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
+        prep_statements = []
+        self.vars_used = set()
         def _prepare(obj):
             if isinstance(obj, Step):
                 obj.prepare_step(module, last_label, last_fn_subr)
+                prep_statements.extend(obj.prep_statements)
+                self.vars_used.update(obj.vars_used)
             elif isinstance(obj, (list, tuple)):
                 for x in obj:
                     _prepare(x)
         _prepare(self.args)
+        self.prep_statements = tuple(prep_statements)
         # FIX: add type checking
 
 
@@ -1371,61 +1378,60 @@ class Call_statement(Statement):
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         fn_type = self.args[0].type.get_type()
+
+        # set self.returning_to
         if len(self.args) == 2:
-            self.returning_to = None
-            if not isinstance(fn_type, Label_type) or \
-               fn_type.label_type not in ('subroutine', 'native_subroutine'):
-                scanner.syntax_error("Must be a SUBROUTINE",
-                                     self.args[0].lexpos, self.args[0].lineno,
-                                     self.args[0].filename)
+            new_label = last_label.new_subr_ret_label(module)
+            self.returning_to = new_label
+            self.post_statements = (new_label.code,)
         else:
             assert len(self.args) == 4
-
             self.returning_to = self.args[3]
-            ret_to_t = self.returning_to.type.get_type()
-            if not isinstance(ret_to_t, Label_type) or \
-               ret_to_t.label_type != 'label':
-                scanner.syntax_error("Must be a LABEL",
-                                     self.returning_to.lexpos,
-                                     self.returning_to.lineno,
-                                     self.returning_to.filename)
 
+        ret_to_t = self.returning_to.type.get_type()
+        if not isinstance(ret_to_t, Label_type) or \
+           ret_to_t.label_type != 'label':
+            scanner.syntax_error("Must be a LABEL",
+                                 self.returning_to.lexpos,
+                                 self.returning_to.lineno,
+                                 self.returning_to.filename)
+
+        if not ret_to_t.required_params and \
+           not ret_to_t.optional_params and \
+           not ret_to_t.kw_params:
+            # return label does not accept any parameters
+            if not isinstance(fn_type, Label_type) or \
+               fn_type.label_type not in ('subroutine',
+                                          'native_subroutine'):
+                scanner.syntax_error("Must be a SUBROUTINE",
+                                     self.args[0].lexpos,
+                                     self.args[0].lineno,
+                                     self.args[0].filename)
+        else:
+            # return label does accept parameters
             if not ret_to_t.required_params and \
-               not ret_to_t.optional_params and \
-               not ret_to_t.kw_params:
-                # return label does not accept any parameters
+               all(opt for opt, _, _ in ret_to_t.kw_params.values()):
+                # return label does not require any parameters
                 if not isinstance(fn_type, Label_type) or \
-                   fn_type.label_type not in ('subroutine',
-                                              'native_subroutine'):
-                    scanner.syntax_error("Must be a SUBROUTINE",
+                   fn_type.label_type == 'label':
+                    scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
                                          self.args[0].lexpos,
                                          self.args[0].lineno,
                                          self.args[0].filename)
             else:
-                # return label does accept parameters
-                if not ret_to_t.required_params and \
-                   all(opt for opt, _, _ in ret_to_t.kw_params.values()):
-                    # return label does not require any parameters
-                    if not isinstance(fn_type, Label_type) or \
-                       fn_type.label_type == 'label':
-                        scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
-                                             self.args[0].lexpos,
-                                             self.args[0].lineno,
-                                             self.args[0].filename)
-                else:
-                    # return label requires some parameters
-                    if not isinstance(fn_type, Label_type) or \
-                       fn_type.label_type not in ('function',
-                                                  'native_function'):
-                        scanner.syntax_error("Must be a FUNCTION",
-                                             self.args[0].lexpos,
-                                             self.args[0].lineno,
-                                             self.args[0].filename)
-                if not ret_to_t.ok_as_return_for(fn_type):
-                    scanner.syntax_error("Incompatible RETURNING_TO: label",
-                                         self.returning_to.lexpos,
-                                         self.returning_to.lineno,
-                                         self.returning_to.filename)
+                # return label requires some parameters
+                if not isinstance(fn_type, Label_type) or \
+                   fn_type.label_type not in ('function',
+                                              'native_function'):
+                    scanner.syntax_error("Must be a FUNCTION",
+                                         self.args[0].lexpos,
+                                         self.args[0].lineno,
+                                         self.args[0].filename)
+            if not ret_to_t.ok_as_return_for(fn_type):
+                scanner.syntax_error("Incompatible RETURNING_TO: label",
+                                     self.returning_to.lexpos,
+                                     self.returning_to.lineno,
+                                     self.returning_to.filename)
 
         fn_type.satisfied_by_arguments(self.args[0], self.args[1][0],
                                        self.args[1][1])
@@ -1991,7 +1997,8 @@ class Call_fn(Expr):
             temp_var = last_label.get_temp(self.type)
             self.code = temp_var.code
             ret_label = last_label.new_fn_ret_label(module, temp_var)
-            # FIX: add call and label to end of prep_statements
+            # FIX: add call to end of prep_statements
+            prep_statements.append(ret_label.code)
         self.prep_statements = tuple(prep_statements)
 
 
