@@ -105,7 +105,6 @@ def write_module_instance_definition(module):
     print(f"struct {module.C_struct_name} {{", file=C_file)
     print("    struct module_descriptor_s *descriptor;", file=C_file)
     for element in module.module_instance_elements:
-        print("    ", end='', file=C_file)
         element()
     print("};", file=C_file)
 
@@ -254,7 +253,8 @@ def assign_variable_names(var, module):
 
 def gen_var_field(var, module):
     dims = ''.join(f"[{d}]" for d in var.dimensions)
-    print(f"{translate_type(var.type)} {var.C_local_name}{dims};", file=C_file)
+    print(f"    {translate_type(var.type)} {var.C_local_name}{dims};",
+          file=C_file)
 
 
 def assign_child_names(module):
