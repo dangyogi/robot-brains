@@ -151,6 +151,13 @@ def set_module_descriptor_pointer(m):
           file=C_file)
 
 
+@todo_with_args(symtable.Module, "prepare_module", Init_labels)
+def init_module_label(module):
+    print(f"    {module.C_label_descriptor_name}.module = "
+            f"(struct module_descriptor_s *)&{module.C_global_name};",
+          file=C_file)
+
+
 @todo_with_args(symtable.Module, "prepare_module", Label_descriptors)
 def write_module_label_descriptor(module):
     write_label_descriptor(module, module)
@@ -225,9 +232,9 @@ def write_label_descriptor(label, module):
 
 @todo_with_args(symtable.Label, "prepare", Init_labels)
 def init_label(label, module):
-    #print(f"    {label.C_label_descriptor_name}.module = "
-    #        f"(struct module_descriptor_s *)&{module.C_global_name};",
-    #      file=C_file)
+    print(f"    {label.C_label_descriptor_name}.module = "
+            f"(struct module_descriptor_s *)&{module.C_global_name};",
+          file=C_file)
     print(
       f"    {label.C_label_descriptor_name}.label = &&{label.C_global_name};",
       file=C_file)

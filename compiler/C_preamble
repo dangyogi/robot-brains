@@ -1,6 +1,3 @@
-// offsetof
-#include <stddef.h>
-
 // memcpy
 #include <string.h>
 
@@ -24,7 +21,8 @@ struct label_descriptor_s {
     struct label_descriptor_s *return_label;
 
     /////////////// initialized in module init:
-    void *label;                  // set in label init code
+    struct module_descriptor_s *module;
+    void *label;
 };
 
 
