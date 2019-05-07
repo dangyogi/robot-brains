@@ -13,7 +13,7 @@ from symtable import (
     Subroutine, Function, Native_subroutine, Native_function,
     Use, Typedef, Label, Return_label, DLT, Conditions, DLT_MAP, Actions,
     Variable, Required_parameter, Optional_parameter,
-    Statement, Call_statement, Opeq_statement, Done_statement,
+    Continue, Set, Goto, Return, Call_statement, Opeq_statement, Done_statement,
     Literal, Reference, Dot, Subscript, Got_keyword, Got_param, Call_fn,
     Unary_expr, Binary_expr, Builtin_type, Typename_type, Label_type,
 )
@@ -443,26 +443,38 @@ def p_const_bool_expr_uminus(p):
 
 def p_simple_statement1(p):
     """
-    simple_statement : GOTO primary arguments
     continue : CONTINUE
     """
-    p[0] = Statement(p.lexpos(1), p.lineno(1), *p[1:])
+    p[0] = Continue(p.lexpos(1), p.lineno(1))
 
 
 def p_simple_statement2(p):
     """
     simple_statement : SET extended_kws lvalue TO normal_kws primary
     """
-    p[0] = Statement(p.lexpos(1), p.lineno(1), p[1], p[3], p[6])
+    p[0] = Set(p.lexpos(1), p.lineno(1), p[3], p[6])
 
 
 def p_simple_statement3(p):
     """
+    simple_statement : GOTO primary arguments
+    """
+    p[0] = Goto(p.lexpos(1), p.lineno(1), p[2], p[3])
+
+
+def p_simple_statement4(p):
+    """
     simple_statement : extended_kws RETURN arguments from_opt normal_kws
-                     | extended_kws RETURN arguments from_opt TO primary \
+    """
+    p[0] = Return(p.lexpos(2), p.lineno(2), p[3], p[4])
+
+
+def p_simple_statement5(p):
+    """
+    simple_statement : extended_kws RETURN arguments from_opt TO primary \
                        normal_kws
     """
-    p[0] = Statement(p.lexpos(2), p.lineno(2), p[2], *p[3:-1])
+    p[0] = Return(p.lexpos(2), p.lineno(2), p[3], p[4], p[6])
 
 
 def p_extended_kws(p):
@@ -473,31 +485,37 @@ def p_extended_kws(p):
 def p_normal_kws(p):
     'normal_kws : '
     set_expanded_kws(False)
-    
 
-def p_simple_statement4(p):
+
+def p_simple_statement6(p):
     """
     simple_statement : primary arguments
-                     | primary arguments RETURNING_TO primary
     """
-    p[0] = Call_statement(p.lexpos(1), p.lineno(1), *p[1:])
+    p[0] = Call_statement(p.lexpos(1), p.lineno(1), p[1], p[2])
 
 
-def p_simple_statement5(p):
+def p_simple_statement7(p):
+    """
+    simple_statement : primary arguments RETURNING_TO primary
+    """
+    p[0] = Call_statement(p.lexpos(1), p.lineno(1), p[1], p[2], p[4])
+
+
+def p_simple_statement8(p):
     """
     simple_statement : primary OPEQ primary
     """
     p[0] = Opeq_statement(p.lexpos(1), p.lineno(1), p[1], p[2], p[3])
 
 
-def p_simple_statement6(p):
+def p_simple_statement9(p):
     """
     simple_statement : extended_kws DONE normal_kws
     """
     p[0] = Done_statement(p.lexpos(2), p.lineno(2))
 
 
-def p_simple_statement7(p):
+def p_simple_statement10(p):
     """
     simple_statement : extended_kws DONE WITH IDENT normal_kws
     """

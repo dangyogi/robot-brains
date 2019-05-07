@@ -1319,19 +1319,6 @@ class Native_function(Native_subroutine):
 class Statement(Step):
     post_statements = ()
 
-    arguments = {
-        'continue': (),
-        'set': ('lvalue', 'expr'),
-        'goto': ('expr', ('*', 'expr')),
-        'return': (('*', 'expr'), 'ignore', 'expr'),
-    }
-
-    formats = {
-        'set': ('{0[0]} = {0[1]}',),
-        'goto': ('goto {}',),
-        'return': ('return {}',),
-    }
-
     def __init__(self, lexpos, lineno, *args):
         self.lexpos = lexpos
         self.lineno = lineno
@@ -1339,10 +1326,10 @@ class Statement(Step):
         self.args = args
 
     def is_final(self):
-        return self.args[0] in ('goto', 'return', 'continue')
+        return False
 
     def is_continue(self):
-        return self.args[0] == 'continue'
+        return False
 
     def dump_details(self, f):
         super().dump_details(f)
@@ -1368,7 +1355,42 @@ class Statement(Step):
         # FIX: add type checking
 
 
-class Call_statement(Statement):
+class Continue(Statement):
+    def is_final(self):
+        return True
+
+    def is_continue(self):
+        return True
+
+
+class Set(Statement):
+    r'''
+    SET lvalue primary
+    '''
+    pass
+
+
+class Statement_with_arguments(Statement):
+    pass
+
+
+class Goto(Statement_with_arguments):
+    r'''
+    GOTO primary arguments
+    '''
+    def is_final(self):
+        return True
+
+
+class Return(Statement_with_arguments):
+    r'''
+    RETURN arguments from_opt [TO primary]
+    '''
+    def is_final(self):
+        return True
+
+
+class Call_statement(Statement_with_arguments):
     # primary arguments [RETURNING_TO primary]
     #
     # arguments is ((primary, ...), kw_arguments)
@@ -1387,8 +1409,8 @@ class Call_statement(Statement):
             self.returning_to = new_label
             self.post_statements = (new_label.code,)
         else:
-            assert len(self.args) == 4
-            self.returning_to = self.args[3]
+            assert len(self.args) == 3
+            self.returning_to = self.args[2]
 
         ret_to_t = self.returning_to.type.get_type()
         if not isinstance(ret_to_t, Label_type) or \
@@ -1475,9 +1497,6 @@ class Opeq_statement(Statement):
 
 class Done_statement(Statement):
     # done [with: label]
-    def is_final(self):
-        return False
-
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         if len(self.args) > 1:
@@ -1721,9 +1740,6 @@ class DLT(Step):
         self.conditions = conditions    # Conditions instance
         self.actions = actions          # Actions instance
         conditions.sync_actions(actions)
-
-    def is_continue(self):
-        return False
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
