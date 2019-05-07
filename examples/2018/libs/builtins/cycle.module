@@ -9,7 +9,7 @@ type label_l_t is label taking label_t
 var tasks is label_t
 var what_next is label_t
 
-dim tasks[100][2]
+dim tasks[100, 2]
 
 dim inum_tasks[2]
 
@@ -95,7 +95,7 @@ subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
     ======================================================================
     | YN | i_task < inum_tasks[i_current]
     ======================================================================
-    | X  | goto tasks[i_task][i_current] # always goes to what_next when
+    | X  | goto tasks[i_task, i_current] # always goes to what_next when
                                          # task is done
     |  X | goto swap_task_lists
     ======================================================================
@@ -119,7 +119,7 @@ subroutine push_task task ?task_list: itask_list
     | YN | inum_tasks[itask_list] >= 100
     ======================================================================
     | X  | abort "task list overflow"
-    |  X | set tasks[inum_tasks[itask_list]][itask_list] to: task
+    |  X | set tasks[inum_tasks[itask_list], itask_list] to: task
     |    | inum_tasks[itask_list] += 1
     |    | return
     ======================================================================

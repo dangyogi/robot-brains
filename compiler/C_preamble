@@ -94,3 +94,13 @@ report_var_not_set(struct label_descriptor_s *label,
     }
 }
 
+
+void
+range_check(struct label_descriptor_s *label, long subscript, long max) {
+    if (subscript < 0 || subscript >= max) {
+        fprintf(stderr, "%s[%lu]: Subscript (%ld) out of range, DIM is %ld\n", 
+                label->module->name, label->lineno, subscript, max);
+        exit(1);
+    }
+}
+

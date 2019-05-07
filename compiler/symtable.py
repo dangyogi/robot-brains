@@ -1863,29 +1863,44 @@ class Dot(Expr):
 
 
 class Subscript(Expr):
-    def __init__(self, array_expr, subscript_expr):
+    def __init__(self, array_expr, subscript_exprs):
         Expr.__init__(self, array_expr.lexpos, array_expr.lineno)
         self.array_expr = array_expr
-        self.subscript_expr = subscript_expr
+        self.subscript_exprs = subscript_exprs
 
     def __repr__(self):
-        return f"<Subscript {self.array_expr} {self.subscript_expr}>"
+        return f"<Subscript {self.array_expr} {self.subscript_exprs}>"
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
+        assert last_label is not None
+        self.containing_label = last_label
+        prep_statements = []
+        self.vars_used = set()
         self.array_expr.prepare_step(module, last_label, last_fn_subr)
-        self.subscript_expr.prepare_step(module, last_label, last_fn_subr)
+        prep_statements.extend(self.array_expr.get_step().prep_statements)
+        self.vars_used.update(self.array_expr.get_step().vars_used)
+        if not isinstance(self.array_expr.get_step(), Variable):
+            scanner.syntax_error("Subscripts may only apply to Variables",
+                                 self.array_expr.lexpos, self.array_expr.lineno,
+                                 self.array_expr.filename)
+        for subscript in self.subscript_exprs:
+            subscript.prepare_step(module, last_label, last_fn_subr)
+            prep_statements.extend(subscript.get_step().prep_statements)
+            self.vars_used.update(subscript.get_step().vars_used)
+        dims = len(self.array_expr.get_step().dimensions)
+        if dims < len(self.subscript_exprs):
+            scanner.syntax_error("Too many subscripts",
+                                 self.subscript_exprs[dims].lexpos,
+                                 self.subscript_exprs[dims].lineno,
+                                 self.subscript_exprs[dims].filename)
+        if dims > len(self.subscript_exprs):
+            scanner.syntax_error("Not enough subscripts",
+                                 self.subscript_exprs[-1].lexpos,
+                                 self.subscript_exprs[-1].lineno,
+                                 self.subscript_exprs[-1].filename)
         self.type = self.array_expr.type
-
-    @property
-    def prep_statements(self):
-        return self.array_expr.get_step().prep_statements \
-             + self.subscript_expr.get_step().prep_statements
-
-    @property
-    def vars_used(self):
-        return self.array_expr.get_step().vars_used.union(
-                 self.subscript_expr.get_step().vars_used)
+        self.prep_statements = tuple(prep_statements)
 
 
 class Got_keyword(Expr):

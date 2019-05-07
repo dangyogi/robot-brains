@@ -185,8 +185,10 @@ def write_statement_code(self, module, extra_indent=0):
     check_all_vars_used(self.containing_label, self.vars_used, extra_indent)
     for line in self.prep_statements:
         print(' ' * extra_indent, "    ", line, sep='', file=C_file)
-    print(' ' * extra_indent, "    // FIX: Implement", sep='', file=C_file)
+
     # FIX: Implement
+    print(' ' * extra_indent, "    // FIX: Implement", sep='', file=C_file)
+
     for line in self.post_statements:
         print(' ' * extra_indent, "    ", line, sep='', file=C_file)
 symtable.Statement.write_code = write_statement_code
@@ -353,9 +355,15 @@ def compile_literal(literal, module, last_label, last_fn_subr):
 def compile_subscript(subscript, module, last_label, last_fn_subr):
     subscript.precedence, subscript.assoc = Precedence_lookup['[']
     array_code = wrap(subscript.array_expr, subscript.precedence, 'left')
-    sub_code = subscript.subscript_expr.get_step().code
-    subscript.code = f"{array_code}[{sub_code}]"
-    # FIX: add subscript range check to end of prep_statements
+    sub_codes = [sub_expr.get_step().code
+                 for sub_expr in subscript.subscript_exprs]
+    subscripts = ''.join(f"[{sub}]" for sub in sub_codes)
+    subscript.code = f"{array_code}{subscripts}"
+    subscript.prep_statements += tuple(
+      f'range_check(&{subscript.containing_label.C_label_descriptor_name}, '
+                  f'{sub}, {dim});'
+      for dim, sub in zip(subscript.array_expr.get_step().dimensions, sub_codes)
+    )
 
 
 @symtable.Got_keyword.as_post_hook("prepare_step")

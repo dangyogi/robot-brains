@@ -198,7 +198,7 @@ t_ANY_ignore_COMMENT = r'\#.*'
 t_ANY_ignore_empty_DLT_MASK = r'\|\ +\|'
 
 
-literals = "+-*/%^?<>.()[]{}"
+literals = "+-*/%^?<>.,()[]{}"
 
 
 def t_CONTINUATION(t):

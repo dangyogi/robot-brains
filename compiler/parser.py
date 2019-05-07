@@ -120,6 +120,7 @@ def p_1tuple(p):
     parameter_types_list1 : simple_type
     kw_parameter_types : kw_parameter_type
     dimensions : dimension
+    subscripts : expr
     native_lines : native_line
     native_elements : native_element
     '''
@@ -135,12 +136,19 @@ def p_append(p):
     kw_parameter_types : kw_parameter_types kw_parameter_type
     parameter_types_list1 : parameter_types_list1 simple_type
     primarys : primarys primary
-    dimensions : dimensions dimension
     action_statements : action_statements simple_statement newlines
     native_lines : native_lines native_line
     native_elements : native_elements native_element
     '''
     p[0] = p[1] + (p[2],)
+
+
+def p_dimensions(p):
+    '''
+    dimensions : dimensions ',' dimension
+    subscripts : subscripts ',' expr
+    '''
+    p[0] = p[1] + (p[3],)
 
 
 def p_native_element1(p):
@@ -206,7 +214,7 @@ def p_all(p):
     arguments : pos_arguments kw_arguments
     kw_argument : KEYWORD pos_arguments
     lvalue : simple_primary '.' IDENT
-    lvalue : simple_primary '[' expr ']'
+    lvalue : simple_primary '[' subscripts ']'
     parameter_types : pos_parameter_types kw_parameter_types
     from_opt : FROM primary
     """
@@ -262,11 +270,11 @@ def p_typename(p):
 
 def p_dimension(p):
     '''
-    dimension : '[' const_expr ']'
+    dimension : const_expr
     '''
-    if not isinstance(p[2], int):
-        syntax_error("Must have integer DIM", p[2].lexpos, p[2].lineno)
-    p[0] = p[2]
+    if not isinstance(p[1], int):
+        syntax_error("Must have integer DIM", p[1].lexpos, p[1].lineno)
+    p[0] = p[1]
 
 
 def p_primary_literal(p):
@@ -304,7 +312,7 @@ def p_primary_dot(p):
 
 
 def p_primary_subscript(p):
-    "simple_primary : simple_primary '[' expr ']'"
+    "simple_primary : simple_primary '[' subscripts ']'"
     p[0] = Subscript(p[1], p[3])
 
 
@@ -603,13 +611,13 @@ def p_lvalue(p):
 
 def p_dim(p):
     '''
-    vartype : DIM IDENT dimensions newlines
+    vartype : DIM IDENT '[' dimensions ']' newlines
     '''
     var = current_namespace().make_variable(p[2])
     if var.dimensions:
         syntax_error("Duplicate variable DIM declaration",
                      p[2].lexpos, p[2].lineno)
-    var.dimensions = p[3]
+    var.dimensions = p[4]
 
 
 def p_fn_name(p):
