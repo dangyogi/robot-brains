@@ -43,7 +43,6 @@ def p_empty_tuple(p):
     pos_arguments :
     kw_arguments :
     parameter_types_list :
-    primarys :
     steps :
     statements :
     action_statements :
@@ -135,8 +134,8 @@ def p_append(p):
     pos_arguments : pos_arguments primary
     kw_parameter_types : kw_parameter_types kw_parameter_type
     parameter_types_list1 : parameter_types_list1 simple_type
-    primarys : primarys primary
     action_statements : action_statements simple_statement newlines
+    action_statements : action_statements continue newlines
     native_lines : native_lines native_line
     native_elements : native_elements native_element
     '''
@@ -396,7 +395,7 @@ def p_pos_parameter_types2(p):
 
 
 def p_const_numeric_expr_uminus(p):
-    r"""
+    """
     const_expr : '-' const_expr               %prec UMINUS
     """
     if not isinstance(p[2], (int, float)):
@@ -406,7 +405,7 @@ def p_const_numeric_expr_uminus(p):
 
 
 def p_const_numeric_expr_binary(p):
-    r"""
+    """
     const_expr : const_expr '^' const_expr
                | const_expr '*' const_expr
                | const_expr '/' const_expr
@@ -433,7 +432,7 @@ ops = {
 
 
 def p_const_bool_expr_uminus(p):
-    r"""
+    """
     const_expr : NOT const_expr
     """
     if not isinstance(p[2], bool):
@@ -443,40 +442,41 @@ def p_const_bool_expr_uminus(p):
 
 
 def p_simple_statement1(p):
-    r"""
-    simple_statement : CONTINUE
-                     | GOTO primary pos_arguments
+    """
+    simple_statement : GOTO primary arguments
+    continue : CONTINUE
     """
     p[0] = Statement(p.lexpos(1), p.lineno(1), *p[1:])
 
 
 def p_simple_statement2(p):
-    r"""
+    """
     simple_statement : SET extended_kws lvalue TO normal_kws primary
     """
     p[0] = Statement(p.lexpos(1), p.lineno(1), p[1], p[3], p[6])
 
 
 def p_simple_statement3(p):
-    r"""
-    simple_statement : extended_kws RETURN primarys from_opt normal_kws
-                     | extended_kws RETURN primarys from_opt TO primary normal_kws
+    """
+    simple_statement : extended_kws RETURN arguments from_opt normal_kws
+                     | extended_kws RETURN arguments from_opt TO primary \
+                       normal_kws
     """
     p[0] = Statement(p.lexpos(2), p.lineno(2), p[2], *p[3:-1])
 
 
 def p_extended_kws(p):
-    r'extended_kws : '
+    'extended_kws : '
     set_expanded_kws(True)
 
 
 def p_normal_kws(p):
-    r'normal_kws : '
+    'normal_kws : '
     set_expanded_kws(False)
     
 
 def p_simple_statement4(p):
-    r"""
+    """
     simple_statement : primary arguments
                      | primary arguments RETURNING_TO primary
     """
@@ -484,28 +484,28 @@ def p_simple_statement4(p):
 
 
 def p_simple_statement5(p):
-    r"""
+    """
     simple_statement : primary OPEQ primary
     """
     p[0] = Opeq_statement(p.lexpos(1), p.lineno(1), p[1], p[2], p[3])
 
 
 def p_simple_statement6(p):
-    r"""
+    """
     simple_statement : extended_kws DONE normal_kws
     """
     p[0] = Done_statement(p.lexpos(2), p.lineno(2))
 
 
 def p_simple_statement7(p):
-    r"""
+    """
     simple_statement : extended_kws DONE WITH IDENT normal_kws
     """
     p[0] = Done_statement(p.lexpos(2), p.lineno(2), p[4])
 
 
 def p_file(p):
-    r'''
+    '''
     file : newlines_opt opmode
          | newlines_opt module
     '''

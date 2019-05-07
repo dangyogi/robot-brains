@@ -1050,7 +1050,7 @@ class With_parameters(Symtable):
                 seen.add(lname)
 
     def assign_passed_bits(self):
-        next_bit_number = 0
+        next_bit_number = 1   # Leave room for RUNNING bit
         for pb in self.gen_param_blocks():
             next_bit_number = pb.assign_passed_bits(next_bit_number)
         self.bits_used = next_bit_number

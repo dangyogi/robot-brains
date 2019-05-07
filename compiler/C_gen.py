@@ -81,7 +81,6 @@ def create_cycle_run_code():
     run = run.get_step()
     done_label = run.new_subr_ret_label(run.parent_namespace)
     Cycle_run_code = (
-        "    // call cycle.run",
         f"    {run.C_label_descriptor_name}.return_label = " \
                 f"&{done_label.C_label_descriptor_name};",
         f"    goto *{run.C_label_descriptor_name}.label;",
