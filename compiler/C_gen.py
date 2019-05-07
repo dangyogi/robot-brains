@@ -64,10 +64,38 @@ def start_main():
     print("main(int argc, char *argv[], char *env[]) {", file=C_file)
 
 
+@todo(Gen_step_code)
+def create_cycle_run_code():
+    global Cycle_run_code
+
+    cycle = symtable.lookup(Token.dummy('cycle'), Opmode, error_not_found=False)
+    if cycle is None or not isinstance(cycle.get_step(), symtable.Module):
+        print("Could not find 'cycle' module", file=sys.stderr)
+        sys.exit(1)
+    cycle = cycle.get_step()
+    run = cycle.lookup(Token.dummy('run'), error_not_found=False)
+    if run is None or not isinstance(run.get_step(), symtable.Subroutine):
+        print("Could not find 'run' subroutine in 'cycle' module",
+              file=sys.stderr)
+        sys.exit(1)
+    run = run.get_step()
+    done_label = run.new_subr_ret_label(run.parent_namespace)
+    Cycle_run_code = (
+        "    // call cycle.run",
+        f"    {run.C_label_descriptor_name}.return_label = " \
+                f"&{done_label.C_label_descriptor_name};",
+        f"    goto *{run.C_label_descriptor_name}.label;",
+        f"  {done_label.code}",
+        "    return 0;",
+    )
+
+
 def call_cycle_run():
-    # FIX
     print(file=C_file)
-    print("    // FIX: call cycle.run", file=C_file)
+    print("    // call cycle.run", file=C_file)
+    for line in Cycle_run_code:
+        print(line, file=C_file)
+    print(file=C_file)
 
 
 def end_main():

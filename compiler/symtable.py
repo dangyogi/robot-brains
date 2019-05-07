@@ -2222,7 +2222,7 @@ def indent_str(indent):
     return " "*indent
 
 
-def lookup(ident, module):
+def lookup(ident, module, error_not_found=True):
     #print("lookup", ident, module)
     obj = module.lookup(ident, error_not_found=False)
     if obj is not None:
@@ -2234,6 +2234,8 @@ def lookup(ident, module):
                        .lookup(ident, error_not_found=False)
     if obj is not None:
         return obj
-    scanner.syntax_error("Not found",
-                         ident.lexpos, ident.lineno, ident.filename)
+    if error_not_found:
+        scanner.syntax_error("Not found",
+                             ident.lexpos, ident.lineno, ident.filename)
+    return None
 
