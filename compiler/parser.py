@@ -212,8 +212,6 @@ def p_all(p):
     """
     arguments : pos_arguments kw_arguments
     kw_argument : KEYWORD pos_arguments
-    lvalue : simple_primary '.' IDENT
-    lvalue : simple_primary '[' subscripts ']'
     parameter_types : pos_parameter_types kw_parameter_types
     from_opt : FROM primary
     """
@@ -301,17 +299,26 @@ def p_return_label2(p):
 
 
 def p_primary_ident(p):
-    "simple_primary : IDENT"
+    """
+    simple_primary : IDENT
+    lvalue : IDENT
+    """
     p[0] = Reference(p[1])
 
 
 def p_primary_dot(p):
-    "simple_primary : simple_primary '.' IDENT"
+    """
+    simple_primary : simple_primary '.' IDENT
+    lvalue : simple_primary '.' IDENT
+    """
     p[0] = Dot(p[1], p[3])
 
 
 def p_primary_subscript(p):
-    "simple_primary : simple_primary '[' subscripts ']'"
+    """
+    simple_primary : simple_primary '[' subscripts ']'
+    lvalue : simple_primary '[' subscripts ']'
+    """
     p[0] = Subscript(p[1], p[3])
 
 
@@ -503,7 +510,7 @@ def p_simple_statement7(p):
 
 def p_simple_statement8(p):
     """
-    simple_statement : primary OPEQ primary
+    simple_statement : lvalue OPEQ primary
     """
     p[0] = Opeq_statement(p.lexpos(1), p.lineno(1), p[1], p[2], p[3])
 
@@ -620,11 +627,6 @@ def p_vartype(p):
                      p[2].lexpos, p[2].lineno)
     var.type = p[4]
     var.explicit_typedef = True
-
-
-def p_lvalue(p):
-    'lvalue : IDENT'
-    p[0] = current_namespace().make_variable(p[1])
 
 
 def p_dim(p):

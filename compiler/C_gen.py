@@ -81,10 +81,12 @@ def create_cycle_run_code():
     run = run.get_step()
     done_label = run.new_subr_ret_label(run.parent_namespace)
     Cycle_run_code = (
+        f"    {run.C_label_descriptor_name}.params_passed |= FLAG_RUNNING;",
         f"    {run.C_label_descriptor_name}.return_label = " \
                 f"&{done_label.C_label_descriptor_name};",
         f"    goto *{run.C_label_descriptor_name}.label;",
-        f"  {done_label.code}",
+        f"",
+        f"  {done_label.decl_code}",
         "    return 0;",
     )
 
@@ -200,7 +202,7 @@ def write_module_code(module):
 
 
 def write_label_code(label, module, extra_indent=0):
-    print(' ' * extra_indent, f"  {label.code}", sep='', file=C_file)
+    print(' ' * extra_indent, f"  {label.decl_code}", sep='', file=C_file)
 symtable.Label.write_code = write_label_code
 
 
@@ -254,8 +256,14 @@ symtable.Continue.write_code_details = write_continue_details
 
 def write_set_details(self, module, extra_indent):
     print(' ' * extra_indent,
-          f"    // FIX: Set",
+          f"    {self.lvalue.code} = {self.primary.code};",
           sep='', file=C_file)
+    var_set = self.lvalue.var_set
+    if var_set is not None:
+        module_desc = f"{var_set.parent_namespace.C_descriptor_name}"
+        print(' ' * extra_indent,
+              f"    {module_desc}.vars_set |= {hex(1 << var_set.set_bit)};",
+              sep='', file=C_file)
 symtable.Set.write_code_details = write_set_details
 
 
@@ -281,8 +289,9 @@ symtable.Call_statement.write_code_details = write_call_details
 
 
 def write_opeq_details(self, module, extra_indent):
-    print(' ' * extra_indent,
-          f"    // FIX: Implement Opeq_statement",
+    _, _, code = Binary_exprs[self.operator.split('=')[0]](self.lvalue,
+                                                           self.expr)
+    print(' ' * extra_indent, f"    {self.lvalue.code} = {code};",
           sep='', file=C_file)
 symtable.Opeq_statement.write_code_details = write_opeq_details
 
@@ -332,7 +341,8 @@ def assign_label_names(label, module):
     label.C_global_name = f"{module.C_global_name}__{label.C_local_name}"
     label.C_label_descriptor_name = label.C_global_name + "__desc"
     label.C_dlt_mask_name = f"{label.C_local_name}__dlt_mask"
-    label.code = label.C_global_name + ':'
+    label.code = '&' + label.C_label_descriptor_name
+    label.decl_code = label.C_global_name + ':'
 
 
 @todo_with_args(symtable.Label, "prepare", Label_descriptors)
@@ -465,6 +475,12 @@ def compile_got_param(self, module, last_label, last_fn_subr):
         self.precedence, self.assoc = Precedence_lookup['&']
         self.code = f"{self.label.C_label_descriptor_name}.params_passed" \
                     f" & {hex(1 << self.bit_number)}"
+
+
+@symtable.Call_fn.as_post_hook("prepare_step")
+def compile_call_fn(self, module, last_label, last_fn_subr):
+    # FIX
+    pass
 
 
 @symtable.Unary_expr.as_post_hook("prepare_step")

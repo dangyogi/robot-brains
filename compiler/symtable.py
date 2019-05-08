@@ -1372,6 +1372,7 @@ class Set(Statement):
     def __init__(self, lexpos, lineno, *args):
         Statement.__init__(self, lexpos, lineno, *args)
         self.lvalue = self.args[0]
+        self.lvalue.set_as_lvalue()
         self.primary = self.args[1]
 
 
@@ -1430,7 +1431,7 @@ class Call_statement(Statement_with_arguments):
         if self.returning_to is None:
             new_label = last_label.new_subr_ret_label(module)
             self.returning_to = new_label
-            self.post_statements = (new_label.code,)
+            self.post_statements = (new_label.decl_code,)
 
         ret_to_t = self.returning_to.type.get_type()
         if not isinstance(ret_to_t, Label_type) or \
@@ -1482,12 +1483,13 @@ class Call_statement(Statement_with_arguments):
 
 
 class Opeq_statement(Statement):
-    # primary OPEQ primary
+    # lvalue OPEQ primary
     def __init__(self, lexpos, lineno, *args):
         Statement.__init__(self, lexpos, lineno, *args)
-        self.expr1 = self.args[0]
+        self.lvalue = self.args[0]
+        self.lvalue.set_as_lvalue()
         self.operator = self.args[1]
-        self.expr2 = self.args[2]
+        self.expr = self.args[2]
 
     def is_final(self):
         return False
@@ -1495,30 +1497,30 @@ class Opeq_statement(Statement):
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         if self.operator[0] == '%':
-            if not self.expr1.is_integer():
+            if not self.lvalue.is_integer():
                 scanner.syntax_error("Must be an integer type",
-                                     self.expr1.lexpos, self.expr1.lineno,
-                                     self.expr1.filename)
+                                     self.lvalue.lexpos, self.lvalue.lineno,
+                                     self.lvalue.filename)
         elif self.operator[0] == '^':
-            if not self.expr1.is_float():
+            if not self.lvalue.is_float():
                 scanner.syntax_error("Must be an float type",
-                                     self.expr1.lexpos, self.expr1.lineno,
-                                     self.expr1.filename)
+                                     self.lvalue.lexpos, self.lvalue.lineno,
+                                     self.lvalue.filename)
         else:
-            if not self.expr1.is_numeric():
+            if not self.lvalue.is_numeric():
                 scanner.syntax_error("Must be a numeric type",
-                                     self.expr1.lexpos, self.expr1.lineno,
-                                     self.expr1.filename)
-        if self.expr1.is_integer():
-            if not self.expr2.is_integer():
+                                     self.lvalue.lexpos, self.lvalue.lineno,
+                                     self.lvalue.filename)
+        if self.lvalue.is_integer():
+            if not self.expr.is_integer():
                 scanner.syntax_error("Must be an integer type",
-                                     self.expr2.lexpos, self.expr2.lineno,
-                                     self.expr2.filename)
+                                     self.expr.lexpos, self.expr.lineno,
+                                     self.expr.filename)
         else:
-            if not self.expr2.is_numeric():
+            if not self.expr.is_numeric():
                 scanner.syntax_error("Must be a numeric type",
-                                     self.expr2.lexpos, self.expr2.lineno,
-                                     self.expr2.filename)
+                                     self.expr.lexpos, self.expr.lineno,
+                                     self.expr.filename)
 
 
 class Done_statement(Statement):
@@ -1839,9 +1841,14 @@ class Reference(Expr):
     def __init__(self, ident):
         Expr.__init__(self, ident.lexpos, ident.lineno)
         self.ident = ident
+        self.as_lvalue = False
 
     def __repr__(self):
         return f"<Reference {self.ident.value}>"
+
+    def set_as_lvalue(self):
+        current_namespace().make_variable(self.ident)
+        self.as_lvalue = True
 
     def get_step(self):
         return self.referent.get_step()
@@ -1856,20 +1863,35 @@ class Reference(Expr):
         #print("Reference", self.ident, "found", self.referent)
         if isinstance(self.referent.get_step(), (Variable, Label)):
             self.prep_statements = self.referent.get_step().prep_statements
-            self.vars_used = self.referent.get_step().vars_used
+            if self.as_lvalue:
+                self.var_set = self.referent.get_step()
+                if not isinstance(self.var_set, Variable):
+                    scanner.syntax_error("Variable expected",
+                                         self.ident.lexpos, self.ident.lineno,
+                                         self.ident.filename)
+            else:
+                self.vars_used = self.referent.get_step().vars_used
             self.precedence = self.referent.get_step().precedence
             self.assoc = self.referent.get_step().assoc
             self.code = self.referent.get_step().code
 
 
 class Dot(Expr):
+    precedence = 100
+    assoc = None
+
     def __init__(self, expr, ident):
         Expr.__init__(self, expr.lexpos, expr.lineno)
         self.expr = expr
         self.ident = ident
+        self.as_lvalue = False
 
     def __repr__(self):
         return f"<Dot {self.expr} {self.ident.value}>"
+
+    def set_as_lvalue(self):
+        #current_namespace().make_variable(self.ident)
+        self.as_lvalue = True
 
     # self.type has to be done for each instance...
     def do_prepare_step(self, module, last_label, last_fn_subr):
@@ -1883,32 +1905,27 @@ class Dot(Expr):
         self.referent = self.expr.get_step().value.lookup(self.ident)
         self.type = self.referent.type
         step = self.referent.get_step()
+        if self.as_lvalue:
+            if not isinstance(step, Variable):
+                scanner.syntax_error("Variable expected",
+                                     self.ident.lexpos, self.ident.lineno,
+                                     self.ident.filename)
+            self.var_set = step
+        else:
+            if isinstance(step, Variable):
+                self.vars_used = frozenset((step,))
         if step.immediate:
             self.immediate = True
             self.value = step.value
 
     @property
-    def prep_statements(self):
-        return self.referent.get_step().prep_statements
-
-    @property
-    def vars_used(self):
-        return self.referent.get_step().vars_used
-
-    @property
-    def precedence(self):
-        return self.referent.get_step().precedence
-
-    @property
-    def assoc(self):
-        return self.referent.get_step().assoc
-
-    @property
     def code(self):
-        return self.referent.get_step().code
+        return self.referent.code
 
 
 class Subscript(Expr):
+    var_set = None
+
     def __init__(self, array_expr, subscript_exprs):
         Expr.__init__(self, array_expr.lexpos, array_expr.lineno)
         self.array_expr = array_expr
@@ -1916,6 +1933,9 @@ class Subscript(Expr):
 
     def __repr__(self):
         return f"<Subscript {self.array_expr} {self.subscript_exprs}>"
+
+    def set_as_lvalue(self):
+        pass
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
@@ -2080,7 +2100,7 @@ class Call_fn(Expr):
             self.code = temp_var.code
             ret_label = last_label.new_fn_ret_label(module, temp_var)
             # FIX: add call to end of prep_statements
-            prep_statements.append(ret_label.code)
+            prep_statements.append(ret_label.decl_code)
         self.prep_statements = tuple(prep_statements)
 
 
