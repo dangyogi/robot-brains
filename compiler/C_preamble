@@ -67,21 +67,31 @@ struct module_descriptor_s {      // initialized outside main
 
 
 void
-report_var_not_set(struct label_descriptor_s *label,
+report_error(struct label_descriptor_s *containing_label, char *format, ...) {
+    va_list args;
+
+    va_start(args, format);
+    fprintf(stderr, "%s[%lu]: ",
+            containing_label->module->name, containing_label->lineno);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    exit(1);
+}
+
+
+void
+report_var_not_set(struct label_descriptor_s *containing_label,
                    unsigned long got, unsigned long expected, ...)
 {
     va_list valist;
-    int num_errors = 0;
 
     va_start(valist, expected);
-
     while (expected) {
         if (expected & 1) {
             char *var_name = va_arg(valist, char *);
             if (!(got & 1)) {
-                fprintf(stderr, "%s[%lu]: Variable (%s) not set\n", 
-                        label->module->name, label->lineno, var_name);
-                num_errors += 1;
+                report_error(containing_label, "Variable (%s) not set\n", 
+                             var_name);
             }
         }
         expected >> 1;
@@ -89,18 +99,17 @@ report_var_not_set(struct label_descriptor_s *label,
     }
 
     va_end(valist);
-    if (num_errors) {
-        exit(1);
-    }
 }
 
 
 void
-range_check(struct label_descriptor_s *label, long subscript, long max) {
+range_check(struct label_descriptor_s *containing_label,
+            long subscript, long max)
+{
     if (subscript < 0 || subscript >= max) {
-        fprintf(stderr, "%s[%lu]: Subscript (%ld) out of range, DIM is %ld\n", 
-                label->module->name, label->lineno, subscript, max);
-        exit(1);
+        report_error(containing_label,
+                     "Subscript (%ld) out of range, DIM is %ld\n", 
+                     subscript, max);
     }
 }
 

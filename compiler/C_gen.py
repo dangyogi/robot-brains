@@ -297,11 +297,28 @@ symtable.Opeq_statement.write_code_details = write_opeq_details
 
 
 def write_done_details(self, module, extra_indent):
+    write_done(self.label, self.containing_label, extra_indent)
+symtable.Done_statement.write_code_details = write_done_details
+
+
+def write_done(done_label, containing_label, extra_indent):
+    extra_indent += 4
     print(' ' * extra_indent,
-          f"    {self.label.C_label_descriptor_name}.params_passed"
+          f"if (!({done_label.C_label_descriptor_name}.params_passed"
+            " & FLAG_RUNNING)) {",
+          sep='', file=C_file)
+    print(' ' * (extra_indent + 4),
+          f"report_error(&{containing_label.C_label_descriptor_name},",
+          sep='', file=C_file)
+    print(' ' * (extra_indent + 4),
+          f'             "\'{done_label.name.value}\' not running -- '
+            'second return?");',
+          sep='', file=C_file)
+    print(' ' * extra_indent, "}", sep='', file=C_file)
+    print(' ' * extra_indent,
+          f"{done_label.C_label_descriptor_name}.params_passed"
             " &= ~FLAG_RUNNING;",
           sep='', file=C_file)
-symtable.Done_statement.write_code_details = write_done_details
 
 
 def write_dlt_code(self, module, extra_indent=0):
@@ -479,7 +496,7 @@ def compile_got_param(self, module, last_label, last_fn_subr):
 
 @symtable.Call_fn.as_post_hook("prepare_step")
 def compile_call_fn(self, module, last_label, last_fn_subr):
-    # FIX
+    # FIX Call_fn
     pass
 
 

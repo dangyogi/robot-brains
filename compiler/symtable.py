@@ -1531,6 +1531,7 @@ class Done_statement(Statement):
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
+        self.containing_label = last_label
         if self.ident is not None:
             self.label = lookup(self.ident, module)
             if not isinstance(self.label, Subroutine):
