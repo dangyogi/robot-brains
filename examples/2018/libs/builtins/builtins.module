@@ -52,7 +52,7 @@ function get_subroutines_by_name name$ returning p_config_s_t
     ======================================================================
     | X  | set ilabel_index to: 0
     |    | goto next_routine
-    |  X | done with: get_subroutine_by_name
+    |  X | done with: get_subroutines_by_name
     |    | goto c_done
     ======================================================================
 

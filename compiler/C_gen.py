@@ -213,8 +213,7 @@ def write_statement_code(self, module, extra_indent=0):
     for line in self.prep_statements:
         print(' ' * extra_indent, "    ", line, sep='', file=C_file)
 
-    # FIX: Implement
-    print(' ' * extra_indent, "    // FIX: Implement", sep='', file=C_file)
+    self.write_code_details(module, extra_indent)
 
     for line in self.post_statements:
         print(' ' * extra_indent, "    ", line, sep='', file=C_file)
@@ -246,6 +245,54 @@ def check_vars_used(label, vars_module, vars_used, extra_indent):
     print(' ' * extra_indent, f"                           {var_names});",
           sep='', file=C_file)
     print(' ' * extra_indent, "    }", sep='', file=C_file)
+
+
+def write_continue_details(self, module, extra_indent):
+    print(' ' * extra_indent, "    break;", sep='', file=C_file)
+symtable.Continue.write_code_details = write_continue_details
+
+
+def write_set_details(self, module, extra_indent):
+    print(' ' * extra_indent,
+          f"    // FIX: Set",
+          sep='', file=C_file)
+symtable.Set.write_code_details = write_set_details
+
+
+def write_goto_details(self, module, extra_indent):
+    print(' ' * extra_indent,
+          f"    // FIX: Goto",
+          sep='', file=C_file)
+symtable.Goto.write_code_details = write_goto_details
+
+
+def write_return_details(self, module, extra_indent):
+    print(' ' * extra_indent,
+          f"    // FIX: Return",
+          sep='', file=C_file)
+symtable.Return.write_code_details = write_return_details
+
+
+def write_call_details(self, module, extra_indent):
+    print(' ' * extra_indent,
+          f"    // FIX: Implement Call_statement",
+          sep='', file=C_file)
+symtable.Call_statement.write_code_details = write_call_details
+
+
+def write_opeq_details(self, module, extra_indent):
+    print(' ' * extra_indent,
+          f"    // FIX: Implement Opeq_statement",
+          sep='', file=C_file)
+symtable.Opeq_statement.write_code_details = write_opeq_details
+
+
+def write_done_details(self, module, extra_indent):
+    print(' ' * extra_indent,
+          f"    {self.label.C_label_descriptor_name}.params_passed"
+            " &= ~FLAG_RUNNING;",
+          sep='', file=C_file)
+symtable.Done_statement.write_code_details = write_done_details
 
 
 def write_dlt_code(self, module, extra_indent=0):
@@ -313,8 +360,11 @@ def write_label_descriptor(label, module):
         print("      {", file=C_file)
         if pb.name is None:
             print('        NULL,   // name', file=C_file)
+        elif pb.optional:
+
+            print(f'        "{pb.name.value[1:]}",   // name', file=C_file)
         else:
-            print(f'        "{pb.name}",   // name', file=C_file)
+            print(f'        "{pb.name.value}",   // name', file=C_file)
         print(f'        {len(pb.required_params) + len(pb.optional_params)},'
                 '   // num_params',
               file=C_file)

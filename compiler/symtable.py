@@ -1317,6 +1317,8 @@ class Native_function(Native_subroutine):
 
 
 class Statement(Step):
+    vars_used = frozenset()
+    prep__statements = ()
     post_statements = ()
 
     def __init__(self, lexpos, lineno, *args):
@@ -1367,7 +1369,10 @@ class Set(Statement):
     r'''
     SET lvalue primary
     '''
-    pass
+    def __init__(self, lexpos, lineno, *args):
+        Statement.__init__(self, lexpos, lineno, *args)
+        self.lvalue = self.args[0]
+        self.primary = self.args[1]
 
 
 class Statement_with_arguments(Statement):
@@ -1378,6 +1383,11 @@ class Goto(Statement_with_arguments):
     r'''
     GOTO primary arguments
     '''
+    def __init__(self, lexpos, lineno, *args):
+        Statement.__init__(self, lexpos, lineno, *args)
+        self.primary = self.args[0]
+        self.arguments = self.args[1]
+
     def is_final(self):
         return True
 
@@ -1386,6 +1396,12 @@ class Return(Statement_with_arguments):
     r'''
     RETURN arguments from_opt [TO primary]
     '''
+    def __init__(self, lexpos, lineno, *args):
+        Statement.__init__(self, lexpos, lineno, *args)
+        self.arguments = self.args[0]
+        self.from_opt = self.args[1]
+        self.to_opt = self.args[2]
+
     def is_final(self):
         return True
 
@@ -1396,21 +1412,25 @@ class Call_statement(Statement_with_arguments):
     # arguments is ((primary, ...), kw_arguments)
     #
     # kw_arguments is ((KEYWORD_TOKEN, (primary, ...)), ...)
+    def __init__(self, lexpos, lineno, *args):
+        Statement.__init__(self, lexpos, lineno, *args)
+        self.primary = self.args[0]
+        self.arguments = self.args[1]
+        self.returning_to = self.args[2]
+        self.final = self.returning_to is not None
+
     def is_final(self):
-        return len(self.args) > 2
+        return self.final
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
-        fn_type = self.args[0].type.get_type()
+        fn_type = self.primary.type.get_type()
 
         # set self.returning_to
-        if len(self.args) == 2:
+        if self.returning_to is None:
             new_label = last_label.new_subr_ret_label(module)
             self.returning_to = new_label
             self.post_statements = (new_label.code,)
-        else:
-            assert len(self.args) == 3
-            self.returning_to = self.args[2]
 
         ret_to_t = self.returning_to.type.get_type()
         if not isinstance(ret_to_t, Label_type) or \
@@ -1428,9 +1448,9 @@ class Call_statement(Statement_with_arguments):
                fn_type.label_type not in ('subroutine',
                                           'native_subroutine'):
                 scanner.syntax_error("Must be a SUBROUTINE",
-                                     self.args[0].lexpos,
-                                     self.args[0].lineno,
-                                     self.args[0].filename)
+                                     self.primary.lexpos,
+                                     self.primary.lineno,
+                                     self.primary.filename)
         else:
             # return label does accept parameters
             if not ret_to_t.required_params and \
@@ -1439,75 +1459,85 @@ class Call_statement(Statement_with_arguments):
                 if not isinstance(fn_type, Label_type) or \
                    fn_type.label_type == 'label':
                     scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
-                                         self.args[0].lexpos,
-                                         self.args[0].lineno,
-                                         self.args[0].filename)
+                                         self.primary.lexpos,
+                                         self.primary.lineno,
+                                         self.primary.filename)
             else:
                 # return label requires some parameters
                 if not isinstance(fn_type, Label_type) or \
                    fn_type.label_type not in ('function',
                                               'native_function'):
                     scanner.syntax_error("Must be a FUNCTION",
-                                         self.args[0].lexpos,
-                                         self.args[0].lineno,
-                                         self.args[0].filename)
+                                         self.primary.lexpos,
+                                         self.primary.lineno,
+                                         self.primary.filename)
             if not ret_to_t.ok_as_return_for(fn_type):
                 scanner.syntax_error("Incompatible RETURNING_TO: label",
                                      self.returning_to.lexpos,
                                      self.returning_to.lineno,
                                      self.returning_to.filename)
 
-        fn_type.satisfied_by_arguments(self.args[0], self.args[1][0],
-                                       self.args[1][1])
+        fn_type.satisfied_by_arguments(self.primary, self.arguments[0],
+                                       self.arguments[1])
 
 
 class Opeq_statement(Statement):
     # primary OPEQ primary
+    def __init__(self, lexpos, lineno, *args):
+        Statement.__init__(self, lexpos, lineno, *args)
+        self.expr1 = self.args[0]
+        self.operator = self.args[1]
+        self.expr2 = self.args[2]
+
     def is_final(self):
         return False
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
-        if self.args[1][0] == '%':
-            if not self.args[0].is_integer():
+        if self.operator[0] == '%':
+            if not self.expr1.is_integer():
                 scanner.syntax_error("Must be an integer type",
-                                     self.args[0].lexpos, self.args[0].lineno,
-                                     self.args[0].filename)
-        elif self.args[1][0] == '^':
-            if not self.args[0].is_float():
+                                     self.expr1.lexpos, self.expr1.lineno,
+                                     self.expr1.filename)
+        elif self.operator[0] == '^':
+            if not self.expr1.is_float():
                 scanner.syntax_error("Must be an float type",
-                                     self.args[0].lexpos, self.args[0].lineno,
-                                     self.args[0].filename)
+                                     self.expr1.lexpos, self.expr1.lineno,
+                                     self.expr1.filename)
         else:
-            if not self.args[0].is_numeric():
+            if not self.expr1.is_numeric():
                 scanner.syntax_error("Must be a numeric type",
-                                     self.args[0].lexpos, self.args[0].lineno,
-                                     self.args[0].filename)
-        if self.args[0].is_integer():
-            if not self.args[2].is_integer():
+                                     self.expr1.lexpos, self.expr1.lineno,
+                                     self.expr1.filename)
+        if self.expr1.is_integer():
+            if not self.expr2.is_integer():
                 scanner.syntax_error("Must be an integer type",
-                                     self.args[2].lexpos, self.args[2].lineno,
-                                     self.args[2].filename)
+                                     self.expr2.lexpos, self.expr2.lineno,
+                                     self.expr2.filename)
         else:
-            if not self.args[2].is_numeric():
+            if not self.expr2.is_numeric():
                 scanner.syntax_error("Must be a numeric type",
-                                     self.args[2].lexpos, self.args[2].lineno,
-                                     self.args[2].filename)
+                                     self.expr2.lexpos, self.expr2.lineno,
+                                     self.expr2.filename)
 
 
 class Done_statement(Statement):
     # done [with: label]
+    def __init__(self, lexpos, lineno, *args):
+        Statement.__init__(self, lexpos, lineno, *args)
+        self.ident = self.args[0]
+
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
-        if len(self.args) > 1:
-            self.label = lookup(self.args[2], module)
+        if self.ident is not None:
+            self.label = lookup(self.ident, module)
             if not isinstance(self.label, Subroutine):
                 scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
-                                     self.args[2].lexpos, self.args[2].lineno,
-                                     self.args[2].filename)
+                                     self.ident.lexpos, self.ident.lineno,
+                                     self.ident.filename)
         else:
-            assert last_label is not None
-            self.label = last_label
+            assert last_fn_subr is not None
+            self.label = last_fn_subr
 
 
 class Conditions(Step):

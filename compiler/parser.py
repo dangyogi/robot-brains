@@ -466,7 +466,7 @@ def p_simple_statement4(p):
     """
     simple_statement : extended_kws RETURN arguments from_opt normal_kws
     """
-    p[0] = Return(p.lexpos(2), p.lineno(2), p[3], p[4])
+    p[0] = Return(p.lexpos(2), p.lineno(2), p[3], p[4], None)
 
 
 def p_simple_statement5(p):
@@ -491,7 +491,7 @@ def p_simple_statement6(p):
     """
     simple_statement : primary arguments
     """
-    p[0] = Call_statement(p.lexpos(1), p.lineno(1), p[1], p[2])
+    p[0] = Call_statement(p.lexpos(1), p.lineno(1), p[1], p[2], None)
 
 
 def p_simple_statement7(p):
@@ -512,7 +512,7 @@ def p_simple_statement9(p):
     """
     simple_statement : extended_kws DONE normal_kws
     """
-    p[0] = Done_statement(p.lexpos(2), p.lineno(2))
+    p[0] = Done_statement(p.lexpos(2), p.lineno(2), None)
 
 
 def p_simple_statement10(p):
