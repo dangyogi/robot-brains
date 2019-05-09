@@ -3,7 +3,9 @@
   - The whole prepare process is run by calling 'setup()' on the opmode.  This:
 
     1. runs link_uses() on builtins and then itself
-    2. runs prepare_module() on builtins and then itself
+    2. runs prepare_module() on builtins
+    3. runs prepare_module_steps() on builtins
+    4. runs prepare_module() on itself
 
 
 - Opmode.link_uses()    <hooked>
@@ -30,6 +32,11 @@
     - prepare_used_module(self)
   - Module.do_prepare_module() also does:
     - set param.variable.constant = True on all module parameters
+    - create self.params_type (as a Label_type) representing the module
+      parameters
+
+
+Module.prepare_module_steps():
     - call prepare_step(self, last_label, last_fn_subr) on each step
       - call last_label.reset() prior to each call
     - reports syntax error on final statement errors
@@ -82,8 +89,10 @@
 - Use.prepare_used_module(module)   <hooked>
 
   - call prepare_step(module, None, None) on all module arguments
-  - pass constant module parameters, set all module parameter 'passed' bits
   - call self.module.prepare_module()
+  - check module argument types/numbers
+  - pass constant module parameters, set all module parameter 'passed' bits
+  - call self.module.prepare_module_steps()
 
 
 - Step.prepare_step(module, last_label, last_fn_subr)  <hooked>
@@ -99,6 +108,10 @@
 
     - Opeq_statement.do_prepare_step also does:
       - verify types of arguments against operator
+
+  - Statement_with_arguments.do_prepare_step
+    - self.do_pre_arg_check_prepare
+    - self.label_type.satisfied_by_arguments
 
   - DLT.do_prepare_step
     - call conditions.prepare_step
@@ -134,3 +147,9 @@
   - Binary_expr.do_prepare_step ...
   - Return_label.do_prepare_step ...
 
+
+Statement_with_arguments.do_pre_arg_check_prepare(module, last_label,
+                                                  last_fn_subr)
+  - Goto.do_pre_arg_check_prepare ...
+  - Return.do_pre_arg_check_prepare ...
+  - Call_statement.do_pre_arg_check_prepare ...

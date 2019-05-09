@@ -29,7 +29,7 @@ var isStarted? is boolean
 
 
 native subroutine abort message$
-    `printf(stderr, "%s\n", ` message$ `);`
+    `fprintf(stderr, "%s\n", ` message$ `);`
     `exit(1);`
 
 
@@ -37,8 +37,8 @@ function get_subroutines_by_name name$ returning p_config_s_t
   goto return_label p_config
 
   subroutine p_config ?c_yield: c_yield ?c_done: c_done ?c_config: c_config
-    var c_yield is label_l_t
-    var c_done is label
+    var c_yield is label_s_t
+    var c_done is label_t
     var c_config is c_config_t
     # FIX: how to make this optional?
     c_config p_next: next_routine p_done: p_done
@@ -73,7 +73,7 @@ function get_subroutines_by_name name$ returning p_config_s_t
     ======================================================================
     | X  | set i to: ilabel_index
     |    | ilabel_index += 1
-    |    | goto c_yield {get_label imodule_index i}
+    |    | goto c_yield {get_subr imodule_index i}
     |  X | ilabel_index += 1
     |    | goto next_routine
     ======================================================================
@@ -84,12 +84,16 @@ native function iget_num_modules
 
 
 native function iget_num_labels imodule
+    # FIX: Verify range of imodule?
     `__module_instances__[` imodule `]->num_labels`
 
 
 native function get_label_name$ imodule ilabel
+    # FIX: Verify range of imodule and ilabel?
     `__module_instances__[` imodule `]->labels[` ilabel `]->name`
 
 
-native function get_label imodule ilabel returning label_t
+native function get_subr imodule ilabel returning subr_t
+    # FIX: Verify range of imodule and ilabel?
+    # FIX: Should verify that the returned label is a subr_t...
     `__module_instances__[` imodule `]->labels[` ilabel `]`
