@@ -1144,14 +1144,15 @@ class Native_subroutine(With_parameters, Step, Entity):
                                self.get_return_types())
         self.type.prepare(module)
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
+    def wtfo(self):
+        # FIX: Should not set anything on self, as self could be used many
+        #      times with different arguments
         prep_statements = []
         self.vars_used = set()
         for line in self.lines:
             for element in line:
                 if element[0] == 'expr':
-                    element[1].prepare_step(module, None, None)
+                    element[1].prepare_step(self.parent_namespace, None, None)
                     prep_statements.extend(element[1].prep_statements)
                     self.vars_used.update(element[1].vars_used)
         self.prep_statements = tuple(prep_statements)
@@ -1162,11 +1163,12 @@ class Native_subroutine(With_parameters, Step, Entity):
     def expand_lines(self):
         r'''Returns a tuple of code strings.
         '''
-        self.prepare_step(self.parent_namespace, None, None)
+        self.wtfo()
         def expand_element(element):
             if element[0] == 'native_string':
                 return element[1]
             else:
+                # FIX: must incorporate args passed
                 return element[1].code
         def expand_line(line):
             return ''.join(expand_element(element) for element in line)
@@ -1333,55 +1335,59 @@ class Call_statement(Statement_with_arguments):
 
     def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
         super().do_pre_arg_check_prepare(module, last_label, last_fn_subr)
-        fn_type = self.primary.type.get_type()
+        fn = self.primary.get_step()
+        fn_type = fn.type.get_type()
         self.label_type = fn_type
 
         # set self.returning_to
         if self.returning_to is None:
-            new_label = last_label.new_subr_ret_label(module)
-            self.returning_to = new_label
-            self.post_statements = (new_label.decl_code,)
-
-        ret_to_t = self.returning_to.type.get_type()
-        if not isinstance(ret_to_t, Label_type) or \
-           ret_to_t.label_type != 'label':
-            scanner.syntax_error("Must be a LABEL",
-                                 self.returning_to.lexpos,
-                                 self.returning_to.lineno,
-                                 self.returning_to.filename)
-
-        if not ret_to_t.required_params and \
-           not ret_to_t.optional_params and \
-           not ret_to_t.kw_params:
-            # return label does not accept any parameters
             if not isinstance(fn_type, Label_type) or \
-               fn_type.label_type not in ('subroutine',
-                                          'native_subroutine'):
-                scanner.syntax_error("Must be a SUBROUTINE",
-                                     self.primary.lexpos,
-                                     self.primary.lineno,
-                                     self.primary.filename)
-        else:
-            # return label does accept parameters
+               not fn_type.label_type.startswith('native_'):
+                new_label = last_label.new_subr_ret_label(module)
+                self.returning_to = new_label
+                self.post_statements = (new_label.decl_code,)
+
+        if self.returning_to is not None:
+            ret_to_t = self.returning_to.type.get_type()
+            if not isinstance(ret_to_t, Label_type) or \
+               ret_to_t.label_type != 'label':
+                scanner.syntax_error("Must be a LABEL",
+                                     self.returning_to.lexpos,
+                                     self.returning_to.lineno,
+                                     self.returning_to.filename)
+
             if not ret_to_t.required_params and \
-               all(opt for opt, _, _ in ret_to_t.kw_params.values()):
-                # return label does not require any parameters
+               not ret_to_t.optional_params and \
+               not ret_to_t.kw_params:
+                # return label does not accept any parameters
                 if not isinstance(fn_type, Label_type) or \
-                   fn_type.label_type == 'label':
-                    scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
+                   fn_type.label_type not in ('subroutine',
+                                              'native_subroutine'):
+                    scanner.syntax_error("Must be a SUBROUTINE",
                                          self.primary.lexpos,
                                          self.primary.lineno,
                                          self.primary.filename)
             else:
-                # return label requires some parameters
-                if not isinstance(fn_type, Label_type) or \
-                   fn_type.label_type not in ('function',
-                                              'native_function'):
-                    scanner.syntax_error("Must be a FUNCTION",
-                                         self.primary.lexpos,
-                                         self.primary.lineno,
-                                         self.primary.filename)
-            ret_to_t.ok_as_return_for(self.error_reporter, fn_type)
+                # return label does accept parameters
+                if not ret_to_t.required_params and \
+                   all(opt for opt, _, _ in ret_to_t.kw_params.values()):
+                    # return label does not require any parameters
+                    if not isinstance(fn_type, Label_type) or \
+                       fn_type.label_type == 'label':
+                        scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
+                                             self.primary.lexpos,
+                                             self.primary.lineno,
+                                             self.primary.filename)
+                else:
+                    # return label requires some parameters
+                    if not isinstance(fn_type, Label_type) or \
+                       fn_type.label_type not in ('function',
+                                                  'native_function'):
+                        scanner.syntax_error("Must be a FUNCTION",
+                                             self.primary.lexpos,
+                                             self.primary.lineno,
+                                             self.primary.filename)
+                ret_to_t.ok_as_return_for(self.error_reporter, fn_type)
 
         fn_type.satisfied_by_arguments(self.error_reporter,
                                        self.arguments[0], self.arguments[1])
@@ -2218,19 +2224,20 @@ def pass_args(with_args, pos_args, kw_args, param_compiler):
 
         - set_param_block_passed(param_block, passed)
         - set_param_passed(param, passed)
-        - pair_param(param, expr)
+        - pair_param(param_block, param, expr)
     '''
     def pass_pos_args(pb, args):
         if pb is None:
             return
+
+        param_compiler.set_param_block_passed(pb, True)
 
         for p, a in zip_longest(pb.gen_parameters(), args):
             if a is None:
                 param_compiler.set_param_passed(p, False)
             else:
                 param_compiler.set_param_passed(p, True)
-                param_compiler.pair_param(p, a)
-        param_compiler.set_param_block_passed(pb, True)
+                param_compiler.pair_param(pb, p, a)
 
     pass_pos_args(with_args.pos_param_block, pos_args)
 
@@ -2251,10 +2258,11 @@ class Use_param_compiler:
     def set_param_passed(self, param, passed):
         param.passed = passed
 
-    def pair_param(self, param, expr):
+    def pair_param(self, param_block, param, expr):
         if expr.get_step().immediate:
             param.variable.immediate = True
             param.variable.value = expr.get_step().value
+            # FIX: need to set the bit in module.vars_set
 
 
 class Error_reporter:

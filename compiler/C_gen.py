@@ -32,7 +32,7 @@ Module_descriptors = []
 Module_instances = []    # list of lines (without final commas)
 Init_labels = []
 Set_module_descriptor_pointers = []
-Initialize_module_parameters = []
+Initialize_module_parameters = []     # FIX: implement
 Module_code = []
 
 
@@ -211,6 +211,7 @@ def write_statement_code(self, module, extra_indent=0):
           f"    {self.containing_label.C_label_descriptor_name}.lineno"
             f" = {self.lineno};",
           sep='', file=C_file)
+    self.write_check_running(extra_indent)
     check_all_vars_used(self.containing_label, self.vars_used, extra_indent)
     for line in self.prep_statements:
         print(' ' * extra_indent, "    ", line, sep='', file=C_file)
@@ -220,6 +221,10 @@ def write_statement_code(self, module, extra_indent=0):
     for line in self.post_statements:
         print(' ' * extra_indent, "    ", line, sep='', file=C_file)
 symtable.Statement.write_code = write_statement_code
+
+def check_statement_running(self, extra_indent):
+    pass
+symtable.Statement.write_check_running = check_statement_running
 
 
 def check_all_vars_used(containing_label, vars_used, extra_indent):
@@ -267,24 +272,100 @@ def write_set_details(self, module, extra_indent):
 symtable.Set.write_code_details = write_set_details
 
 
+class Label_param_compiler:
+    def __init__(self, label):
+        self.label = label              # Label receiving the arguments
+        if isinstance(label, symtable.Subroutine):
+            self.passed_mask = 1        # RUNNING bit
+        else:
+            self.passed_mask = 0
+        self.vars_set_mask = 0
+        self.lines = []
+
+    def set_param_block_passed(self, param_block, passed):
+        if param_block.optional and passed:
+            self.passed_mask |= 1 << param_block.kw_passed_bit
+
+    def set_param_passed(self, param, passed):
+        if isinstance(param, symtable.Optional_parameter) and passed:
+            self.passed_mask |= 1 << param.passed_bit
+
+    def pair_param(self, param_block, param, expr):
+        self.lines.append(f'{param.variable.code} = {expr.code};')
+        self.vars_set_mask |= 1 << param.variable.set_bit
+
+    def compile(self, arguments, extra_indent):
+        symtable.pass_args(self.label, arguments[0], arguments[1], self)
+        extra_indent += 4
+        for line in self.lines:
+            print(' ' * extra_indent, line, sep='', file=C_file)
+        if self.passed_mask:
+            print(' ' * extra_indent,
+                  f'{self.label.C_label_descriptor_name}.params_passed'
+                    f' = {hex(self.passed_mask)};',
+                  sep='', file=C_file)
+        if self.vars_set_mask:
+            print(' ' * extra_indent,
+                  f'{self.label.parent_namespace.C_descriptor_name}.vars_set'
+                    f' |= {hex(self.vars_set_mask)};',
+                  sep='', file=C_file)
+
+
 def write_goto_details(self, module, extra_indent):
-    print(' ' * extra_indent,
-          f"    // FIX: Goto",
-          sep='', file=C_file)
+    if self.primary.immediate and \
+       isinstance(self.primary.value, symtable.Label):
+        label = self.primary.value
+        Label_param_compiler(label).compile(self.arguments, extra_indent)
+        print(' ' * extra_indent,
+              f'goto *{label.C_label_descriptor_name}.label;',
+              sep='', file=C_file)
+    else:
+        print(' ' * extra_indent,
+              f"    // FIX: Goto variable ...",
+              sep='', file=C_file)
 symtable.Goto.write_code_details = write_goto_details
 
 
 def write_return_details(self, module, extra_indent):
+    # FIX: do done too
     print(' ' * extra_indent,
           f"    // FIX: Return",
           sep='', file=C_file)
 symtable.Return.write_code_details = write_return_details
 
 
+def check_call_statement_running(self, extra_indent):
+    if not self.label_type.label_type.startswith('native_'):
+        extra_indent += 4
+        label = self.primary.get_step().code
+        print(' ' * extra_indent,
+              f"if (({label})->params_passed & FLAG_RUNNING) {{",
+              sep='', file=C_file)
+        print(' ' * (extra_indent + 4),
+              f"report_error(&{self.containing_label.C_label_descriptor_name},",
+              sep='', file=C_file)
+        print(' ' * (extra_indent + 4),
+              f'             "\'%s\' still running", ({label})->name);',
+              sep='', file=C_file)
+        print(' ' * extra_indent, "}", sep='', file=C_file)
+        print(' ' * extra_indent,
+              f"({label})->params_passed |= FLAG_RUNNING;",
+              sep='', file=C_file)
+symtable.Call_statement.write_check_running = check_call_statement_running
+
 def write_call_details(self, module, extra_indent):
-    print(' ' * extra_indent,
-          f"    // FIX: Implement Call_statement",
-          sep='', file=C_file)
+    if not self.label_type.label_type.startswith('native_'):
+        if self.primary.immediate and \
+             isinstance(self.primary.value, symtable.Label):
+            label = self.primary.value
+            Label_param_compiler(label).compile(self.arguments, extra_indent)
+            print(' ' * extra_indent,
+                  f'goto *{label.C_label_descriptor_name}.label;',
+                  sep='', file=C_file)
+        else:
+            print(' ' * extra_indent,
+                  f"    // FIX: Call_statement variable ...",
+                  sep='', file=C_file)
 symtable.Call_statement.write_code_details = write_call_details
 
 
@@ -445,14 +526,14 @@ def assign_variable_names(var, module):
 
 @symtable.Literal.as_post_hook("prepare_step")
 def compile_literal(literal, module, last_label, last_fn_subr):
-    if isinstance(literal.value, (int, float)):
+    if isinstance(literal.value, bool):
+        literal.code = "1" if literal.value else "0"
+    elif isinstance(literal.value, (int, float)):
         literal.code = repr(literal.value)
-    elif isinstance(literal.value, str):
+    else:
+        assert isinstance(literal.value, str)
         escaped_str = literal.value.replace('"', r'\"')
         literal.code = f'"{escaped_str}"'
-    else:
-        assert isinstance(literal.value, bool)
-        literal.code = "1" if literal.value else "0"
 
 
 @symtable.Subscript.as_post_hook("prepare_step")
@@ -524,6 +605,7 @@ def compile_binary_expr(self, module, last_label, last_fn_subr):
         elif isinstance(self.value, (int, float)):
             self.code = repr(self.value)
         else:
+            assert isinstance(self.value, str)
             escaped_str = self.value.replace('"', r'\"')
             self.code = f'"{escaped_str}"'
     else:
