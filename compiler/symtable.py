@@ -328,6 +328,8 @@ class Typedef(Entity):
 
 
 class Type(Symtable):
+    any_type = False
+
     def get_type(self):
         return self
 
@@ -357,10 +359,14 @@ class Type(Symtable):
         '''
         my_t = self.get_type()
         arg_t = arg_type.get_type()
-        if my_t is not arg_t:
+        if not my_t.any_type and not arg_t.any_type and my_t is not arg_t:
             if type(my_t) != type(arg_t):
                 reporter.report(f"Incompatible types, {my_t} and {arg_t}")
             my_t._can_take_type(reporter, arg_t)
+
+
+class Any_type(Type):
+    any_type = True
 
 
 class Builtin_type(Type):
@@ -446,8 +452,7 @@ class Typename_type(Type):
 
 class Label_type(Type):
     r'''
-    self.label_type is "subroutine", "function", "label",
-                       "native_subroutine" or "native_function"
+    self.label_type is "subroutine", "function" or "label"
     self.required_params is (type, ...)
     self.optional_params is (type, ...)
     self.kw_params is {KEYWORD_TOKEN: (kw_optional, (type, ...), (type, ...))}
@@ -469,12 +474,12 @@ class Label_type(Type):
                     self.kw_params[keyword] = (True, req, opt)
                 else:
                     self.kw_params[keyword] = (False, req, opt)
-        if self.label_type in ('function', 'native_function'):
+        if self.label_type == 'function':
             self.return_types = return_types
             self.return_label_type = Label_type('label', return_types)
         else:
             assert return_types is None
-            if self.label_type in ('subroutine', 'native_subroutine'):
+            if self.label_type == 'subroutine':
                 self.return_label_type = Label_type('label', None)
 
     def __repr__(self):
@@ -1125,79 +1130,6 @@ class Function(Subroutine):
         print(f" return_types {self.return_types}", end='', file=f)
 
 
-class Native_subroutine(With_parameters, Step, Entity):
-    def __init__(self, ident):
-        Entity.__init__(self, ident)
-        With_parameters.__init__(self)
-
-    def add_lines(self, lines):
-        # lines is ((element, ...), ...)
-        #
-        # where element is either ('expr', expr) or ('native_string', str)
-        self.lines = lines
-
-    def do_prepare(self, module):
-        super().do_prepare(module)
-        assert self.parent_namespace == module
-        self.type = Label_type(self.__class__.__name__,
-                               self.as_taking_blocks(),
-                               self.get_return_types())
-        self.type.prepare(module)
-
-    def wtfo(self):
-        # FIX: Should not set anything on self, as self could be used many
-        #      times with different arguments
-        prep_statements = []
-        self.vars_used = set()
-        for line in self.lines:
-            for element in line:
-                if element[0] == 'expr':
-                    element[1].prepare_step(self.parent_namespace, None, None)
-                    prep_statements.extend(element[1].prep_statements)
-                    self.vars_used.update(element[1].vars_used)
-        self.prep_statements = tuple(prep_statements)
-
-    def get_return_types(self):
-        return None
-
-    def expand_lines(self):
-        r'''Returns a tuple of code strings.
-        '''
-        self.wtfo()
-        def expand_element(element):
-            if element[0] == 'native_string':
-                return element[1]
-            else:
-                # FIX: must incorporate args passed
-                return element[1].code
-        def expand_line(line):
-            return ''.join(expand_element(element) for element in line)
-        return tuple(expand_line(line) for line in self.lines)
-
-
-class Native_function(Native_subroutine):
-    def __init__(self, ident):
-        Native_subroutine.__init__(self, ident)
-        self.return_type = Builtin_type(ident.type)
-
-    def set_return_type(self, return_type):
-        self.return_type = return_type
-
-    def get_return_types(self):
-        return (((self.return_type,), ()), ())
-
-    def do_prepare(self, module):
-        super().do_prepare(module)
-        self.return_type.prepare(module)
-
-    def gen_code(self):
-        r'Returns prep_statements, vars_used, code.'
-        code_lines = self.expand_lines()
-        return (self.prep_statements + code_lines[:-1],
-                self.vars_used,
-                f"({code_lines[-1]})")
-
-
 class Statement(Step):
     vars_used = frozenset()
     prep__statements = ()
@@ -1260,6 +1192,44 @@ class Set(Statement):
         super().do_prepare_step(module, last_label, last_fn_subr)
         self.lvalue.type.get_type().can_take_type(Error_reporter(self.primary),
                                                   self.primary.type)
+
+
+class Native:
+    def __init__(self, native_elements):
+        self.native_elements = native_elements  # tuple of Expr|str
+
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        prep_statements = []
+        self.vars_used = set()
+        for element in self.native_elements:
+            if isinstance(element, Expr):
+                element.prepare_step(module, last_label, last_fn_subr)
+                self.vars_used.update(element.vars_used)
+                prep_statements.extend(element.prep_statements)
+        self.prep_statements = tuple(prep_statements)
+
+    def gen_code(self):
+        segments = []
+        for element in self.native_elements:
+            if isinstance(element, str):
+                segments.append(element)
+            else:
+                segments.append(element.get_step().code)
+        return ''.join(segments)
+
+
+class Native_statement(Native, Statement):
+    def __init__(self, lexpos, lineno, native_elements):
+        Statement.__init__(self, lexpos, lineno)
+        Native.__init__(self, native_elements)
+
+    def is_final(self):
+        for native_final in ('exit(', 'return ', 'return(', 'goto ',
+                             'break;', 'continue;'):
+            if self.native_elements[0].startswith(native_final):
+                return True
+        return False
 
 
 class Statement_with_arguments(Statement):
@@ -1348,53 +1318,48 @@ class Call_statement(Statement_with_arguments):
 
         # set self.returning_to
         if self.returning_to is None:
+            new_label = last_label.new_subr_ret_label(module)
+            self.returning_to = new_label
+            self.post_statements = (new_label.decl_code,)
+
+        ret_to_t = self.returning_to.type.get_type()
+        if not isinstance(ret_to_t, Label_type) or \
+           ret_to_t.label_type != 'label':
+            scanner.syntax_error("Must be a LABEL",
+                                 self.returning_to.lexpos,
+                                 self.returning_to.lineno,
+                                 self.returning_to.filename)
+
+        if not ret_to_t.required_params and \
+           not ret_to_t.optional_params and \
+           not ret_to_t.kw_params:
+            # return label does not accept any parameters
             if not isinstance(fn_type, Label_type) or \
-               not fn_type.label_type.startswith('native_'):
-                new_label = last_label.new_subr_ret_label(module)
-                self.returning_to = new_label
-                self.post_statements = (new_label.decl_code,)
-
-        if self.returning_to is not None:
-            ret_to_t = self.returning_to.type.get_type()
-            if not isinstance(ret_to_t, Label_type) or \
-               ret_to_t.label_type != 'label':
-                scanner.syntax_error("Must be a LABEL",
-                                     self.returning_to.lexpos,
-                                     self.returning_to.lineno,
-                                     self.returning_to.filename)
-
+               fn_type.label_type != 'subroutine':
+                scanner.syntax_error("Must be a SUBROUTINE",
+                                     self.primary.lexpos,
+                                     self.primary.lineno,
+                                     self.primary.filename)
+        else:
+            # return label does accept parameters
             if not ret_to_t.required_params and \
-               not ret_to_t.optional_params and \
-               not ret_to_t.kw_params:
-                # return label does not accept any parameters
+               all(opt for opt, _, _ in ret_to_t.kw_params.values()):
+                # return label does not require any parameters
                 if not isinstance(fn_type, Label_type) or \
-                   fn_type.label_type not in ('subroutine',
-                                              'native_subroutine'):
-                    scanner.syntax_error("Must be a SUBROUTINE",
+                   fn_type.label_type == 'label':
+                    scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
                                          self.primary.lexpos,
                                          self.primary.lineno,
                                          self.primary.filename)
             else:
-                # return label does accept parameters
-                if not ret_to_t.required_params and \
-                   all(opt for opt, _, _ in ret_to_t.kw_params.values()):
-                    # return label does not require any parameters
-                    if not isinstance(fn_type, Label_type) or \
-                       fn_type.label_type == 'label':
-                        scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
-                                             self.primary.lexpos,
-                                             self.primary.lineno,
-                                             self.primary.filename)
-                else:
-                    # return label requires some parameters
-                    if not isinstance(fn_type, Label_type) or \
-                       fn_type.label_type not in ('function',
-                                                  'native_function'):
-                        scanner.syntax_error("Must be a FUNCTION",
-                                             self.primary.lexpos,
-                                             self.primary.lineno,
-                                             self.primary.filename)
-                ret_to_t.ok_as_return_for(self.error_reporter, fn_type)
+                # return label requires some parameters
+                if not isinstance(fn_type, Label_type) or \
+                   fn_type.label_type != 'function':
+                    scanner.syntax_error("Must be a FUNCTION",
+                                         self.primary.lexpos,
+                                         self.primary.lineno,
+                                         self.primary.filename)
+            ret_to_t.ok_as_return_for(self.error_reporter, fn_type)
 
         fn_type.satisfied_by_arguments(self.error_reporter,
                                        self.arguments[0], self.arguments[1])
@@ -1753,7 +1718,7 @@ class Literal(Expr):
 
 
 class Reference(Expr):
-    r'''An IDENT that references either a Variable, Label or Native_subroutine.
+    r'''An IDENT that references either a Variable or Label.
 
     Type IDENTs are converted to Typename_types rather than References.
     '''
@@ -1990,7 +1955,7 @@ class Call_fn(Expr):
         self.vars_used = set(self.fn.vars_used).copy()
         fn_type = self.fn.type.get_type()
         if not isinstance(fn_type, Label_type) or \
-           fn_type.label_type not in ('function', 'native_function') or \
+           fn_type.label_type != 'function' or \
            len(fn_type.return_types[0][0]) != 1 or \
            fn_type.return_types[0][1] or \
            fn_type.return_types[1]:
@@ -2009,17 +1974,11 @@ class Call_fn(Expr):
         fn_type.satisfied_by_arguments(Error_reporter(self.fn),
                                        self.pos_arguments, self.kw_arguments)
         self.type = fn_type.return_types[0][0][0]
-        if isinstance(self.fn.get_step(), Native_function):
-            native_prep_statements, native_vars_used, self.code = \
-              self.fn.get_step().gen_code()
-            prep_statements.extend(native_prep_statements)
-            self.vars_used.update(native_vars_used)
-        else:
-            temp_var = last_label.get_temp(self.type)
-            self.code = temp_var.code
-            ret_label = last_label.new_fn_ret_label(module, temp_var)
-            # FIX: add call to end of prep_statements
-            prep_statements.append(ret_label.decl_code)
+        temp_var = last_label.get_temp(self.type)
+        self.code = temp_var.code
+        ret_label = last_label.new_fn_ret_label(module, temp_var)
+        # FIX: add call to end of prep_statements
+        prep_statements.append(ret_label.decl_code)
         self.prep_statements = tuple(prep_statements)
 
 
@@ -2201,6 +2160,14 @@ class Return_label(Expr):
                                      self.label.lexpos, self.label.lineno,
                                      self.label.filename)
         self.type = self.label.type.return_label_type
+
+
+class Native_expr(Native, Expr):
+    type = Any_type()
+
+    def __init__(self, lexpos, lineno, native_elements):
+        Expr.__init__(self, lexpos, lineno)
+        Native.__init__(self, native_elements)
 
 
 def indent_str(indent):

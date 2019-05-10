@@ -10,7 +10,7 @@ from scanner import (
 
 from symtable import (
     last_parameter_obj, current_namespace, top_namespace, Module, Opmode,
-    Subroutine, Function, Native_subroutine, Native_function,
+    Subroutine, Function, Native_statement, Native_expr,
     Use, Typedef, Label, Return_label, DLT, Conditions, DLT_MAP, Actions,
     Variable, Required_parameter, Optional_parameter,
     Continue, Set, Goto, Return, Call_statement, Opeq_statement, Done_statement,
@@ -52,13 +52,14 @@ def p_empty_tuple(p):
 
 def p_first(p):
     '''
-    native_line : native_elements newlines
     const_expr : STRING_LIT
                | FLOAT_LIT
                | INTEGER_LIT
                | BOOLEAN_LIT
     expr : primary
     primary : simple_primary
+    native_element : primary
+                   | NATIVE_STRING_LIT
     type : simple_type
     statement : simple_statement newlines
               | dlt
@@ -120,8 +121,7 @@ def p_1tuple(p):
     kw_parameter_types : kw_parameter_type
     dimensions : dimension
     subscripts : expr
-    native_lines : native_line
-    native_elements : native_element
+    native_elements : NATIVE_STRING_LIT
     '''
     p[0] = (p[1],)
 
@@ -136,7 +136,6 @@ def p_append(p):
     parameter_types_list1 : parameter_types_list1 simple_type
     action_statements : action_statements simple_statement newlines
     action_statements : action_statements continue newlines
-    native_lines : native_lines native_line
     native_elements : native_elements native_element
     '''
     p[0] = p[1] + (p[2],)
@@ -150,16 +149,6 @@ def p_dimensions(p):
     p[0] = p[1] + (p[3],)
 
 
-def p_native_element1(p):
-    'native_element : primary'
-    p[0] = ('expr', p[1])
-
-
-def p_native_element2(p):
-    'native_element : NATIVE_STRING_LIT'
-    p[0] = ('native_string', p[1])
-
-
 def p_actions(p):
     'actions : actions action'
     p[0] = p[1] + p[2]
@@ -170,35 +159,6 @@ def p_step1(p):
     step : label_decl typedefs vartypes statements
     '''
     p[0] = (p[1],) + p[4]
-
-
-def p_step2(p):
-    '''
-    step : NATIVE FUNCTION native_fn_name required_parameters newlines \
-             native_lines
-    '''
-    p[3].add_lines(p[6])
-    p[0] = ()
-
-
-def p_step3(p):
-    '''
-    step : NATIVE FUNCTION native_fn_name required_parameters \
-             RETURNING simple_type newlines \
-             native_lines
-    '''
-    p[3].set_return_type(p[6])
-    p[3].add_lines(p[8])
-    p[0] = ()
-
-
-def p_step4(p):
-    '''
-    step : NATIVE SUBROUTINE native_sub_name required_parameters newlines \
-             native_lines
-    '''
-    p[3].add_lines(p[6])
-    p[0] = ()
 
 
 def p_paste(p):
@@ -384,6 +344,13 @@ def p_binary_expr(p):
     p[0] = Binary_expr(p[1], p[2], p[3])
 
 
+def p_native_expr(p):
+    """
+    expr : native_elements
+    """
+    p[0] = Native_expr(p.lexpos(1), p.lineno(1), p[1])
+
+
 def p_pos_parameter_types1(p):
     '''
     parameter_types : pos_parameter_types1
@@ -529,6 +496,13 @@ def p_simple_statement10(p):
     p[0] = Done_statement(p.lexpos(2), p.lineno(2), p[4])
 
 
+def p_simple_statement11(p):
+    """
+    simple_statement : native_elements
+    """
+    p[0] = Native_statement(p.lexpos(1), p.lineno(1), p[1])
+
+
 def p_file(p):
     '''
     file : newlines_opt opmode
@@ -645,19 +619,9 @@ def p_fn_name(p):
     p[0] = Function(p[1])
 
 
-def p_native_fn_name(p):
-    'native_fn_name : IDENT'
-    p[0] = Native_function(p[1])
-
-
 def p_sub_name(p):
     'sub_name : IDENT'
     p[0] = Subroutine(p[1])
-
-
-def p_native_sub_name(p):
-    'native_sub_name : IDENT'
-    p[0] = Native_subroutine(p[1])
 
 
 def p_label_name(p):

@@ -313,37 +313,35 @@ symtable.Return.write_code_details = write_return_details
 
 
 def check_call_statement_running(self, extra_indent):
-    if not self.label_type.label_type.startswith('native_'):
-        extra_indent += 4
-        label = self.primary.get_step().code
-        print(' ' * extra_indent,
-              f"if (({label})->params_passed & FLAG_RUNNING) {{",
-              sep='', file=C_file)
-        print(' ' * (extra_indent + 4),
-              f"report_error(&{self.containing_label.C_label_descriptor_name},",
-              sep='', file=C_file)
-        print(' ' * (extra_indent + 4),
-              f'             "\'%s\' still running", ({label})->name);',
-              sep='', file=C_file)
-        print(' ' * extra_indent, "}", sep='', file=C_file)
-        print(' ' * extra_indent,
-              f"({label})->params_passed |= FLAG_RUNNING;",
-              sep='', file=C_file)
+    extra_indent += 4
+    label = self.primary.get_step().code
+    print(' ' * extra_indent,
+          f"if (({label})->params_passed & FLAG_RUNNING) {{",
+          sep='', file=C_file)
+    print(' ' * (extra_indent + 4),
+          f"report_error(&{self.containing_label.C_label_descriptor_name},",
+          sep='', file=C_file)
+    print(' ' * (extra_indent + 4),
+          f'             "\'%s\' still running", ({label})->name);',
+          sep='', file=C_file)
+    print(' ' * extra_indent, "}", sep='', file=C_file)
+    print(' ' * extra_indent,
+          f"({label})->params_passed |= FLAG_RUNNING;",
+          sep='', file=C_file)
 symtable.Call_statement.write_check_running = check_call_statement_running
 
 def write_call_details(self, module, extra_indent):
-    if not self.label_type.label_type.startswith('native_'):
-        if self.primary.immediate and \
-             isinstance(self.primary.value, symtable.Label):
-            label = self.primary.value
-            Label_param_compiler(label).compile(self.arguments, extra_indent)
-            print(' ' * extra_indent,
-                  f'goto *{label.C_label_descriptor_name}.label;',
-                  sep='', file=C_file)
-        else:
-            print(' ' * extra_indent,
-                  f"    // FIX: Call_statement variable ...",
-                  sep='', file=C_file)
+    if self.primary.immediate and \
+         isinstance(self.primary.value, symtable.Label):
+        label = self.primary.value
+        Label_param_compiler(label).compile(self.arguments, extra_indent)
+        print(' ' * extra_indent,
+              f'goto *{label.C_label_descriptor_name}.label;',
+              sep='', file=C_file)
+    else:
+        print(' ' * extra_indent,
+              f"    // FIX: Call_statement variable ...",
+              sep='', file=C_file)
 symtable.Call_statement.write_code_details = write_call_details
 
 

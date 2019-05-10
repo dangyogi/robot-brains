@@ -57,6 +57,7 @@ def generate(opmode):
     Target_language.Opmode = opmode
     print("generate: running opmode.setup")
     opmode.setup()
+    print()
     print("generate: running Todo_lists")
     run_todo_lists()
     print("generate: done")

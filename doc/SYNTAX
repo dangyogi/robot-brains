@@ -62,10 +62,6 @@ step : label_decl
          {typedef}
          {vartype}
          {statement}
-     | NATIVE FUNCTION IDENT {IDENT} [RETURNING simple_type] NEWLINES
-         1{native_line}
-     | NATIVE SUBROUTINE IDENT {IDENT} NEWLINES
-         1{native_line}
 
 
 label_decl : FUNCTION IDENT parameters [RETURNING parameter_types] NEWLINES
@@ -93,6 +89,7 @@ simple_statement : GOTO primary arguments
                  | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
                  | DONE
                  | DONE WITH: IDENT
+                 | native_elements
 
 
 dlt : '====' NEWLINE
@@ -105,7 +102,8 @@ dlt : '====' NEWLINE
 action : '|' {'X'|' '} '|' [NEWLINES] {(simple_statement|CONTINUE) NEWLINES}
 
 
-native_line : 1{primary | NATIVE_STRING_LIT} NEWLINES
+native_elements : NATIVE_STRING_LIT 
+                | native_elements (NATIVE_STRING_LIT | primary)
 
 
 lvalue : IDENT
@@ -136,6 +134,7 @@ expr : primary
      | expr '<>' expr
      | expr '!~=' expr
      | expr '<~>' expr
+     | native_elements
 
 
 primary : simple_primary

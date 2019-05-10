@@ -29,9 +29,8 @@ var isStarted? is boolean
 
 
 label abort message$
-    # FIX
-    #`fprintf(stderr, "%s\n", ` message$ `);`
-    #`exit(1);`
+    `fprintf(stderr, "%s\n", ` message$ `);`
+    `exit(1);`
 
 
 function get_subroutines_by_name name$ returning p_config_s_t
@@ -81,27 +80,20 @@ function get_subroutines_by_name name$ returning p_config_s_t
 
 
 function iget_num_modules
-    # FIX
-    #return `__num_modules__`
-    return 2
+    return (`__num_modules__`)
 
 
 function iget_num_labels imodule
-    # FIX
     # FIX: Verify range of imodule?
-    #return `__module_instances__[` imodule `]->num_labels`
-    return 1
+    return (`__module_instances__[` imodule `]->num_labels`)
 
 
 function get_label_name$ imodule ilabel
-    # FIX
     # FIX: Verify range of imodule and ilabel?
-    #return `__module_instances__[` imodule `]->labels[` ilabel `]->name`
-    return "bob"
+    return (`__module_instances__[` imodule `]->labels[` ilabel `]->name`)
 
 
 function get_subr imodule ilabel returning subr_t
-    # FIX
     # FIX: Verify range of imodule and ilabel?
     # FIX: Should verify that the returned label is a subr_t...
-    #return `__module_instances__[` imodule `]->labels[` ilabel `]`
+    return (`__module_instances__[` imodule `]->labels[` ilabel `]`)

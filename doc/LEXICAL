@@ -32,7 +32,6 @@ reserved words:
     - IS
     - LABEL
     - MODULE
-    - NATIVE
     - NOT
     - OPMODE
     - RETURN

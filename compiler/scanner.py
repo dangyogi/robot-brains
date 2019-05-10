@@ -83,7 +83,6 @@ reserved = frozenset((
     'IS',
     'LABEL',
     'MODULE',
-    'NATIVE',
     'NOT',
     'OPMODE',
     'RETURN',
