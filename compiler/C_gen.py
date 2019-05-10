@@ -81,7 +81,7 @@ def create_cycle_run_code():
     run = run.get_step()
     done_label = run.new_subr_ret_label(run.parent_namespace)
     Cycle_run_code = (
-        f"    {run.C_label_descriptor_name}.params_passed |= FLAG_RUNNING;",
+        f"    {run.C_label_descriptor_name}.params_passed = FLAG_RUNNING;",
         f"    {run.C_label_descriptor_name}.return_label = " \
                 f"&{done_label.C_label_descriptor_name};",
         f"    goto *{run.C_label_descriptor_name}.label;",
@@ -272,64 +272,42 @@ def write_set_details(self, module, extra_indent):
 symtable.Set.write_code_details = write_set_details
 
 
-class Label_param_compiler:
-    def __init__(self, label):
-        self.label = label              # Label receiving the arguments
-        if isinstance(label, symtable.Subroutine):
-            self.passed_mask = 1        # RUNNING bit
+def write_args(dest_label, pos_args, kw_args, extra_indent):
+    def write_pb(args, pb_name=None):
+        if pb_name is None:
+            keyword = 'NULL'
         else:
-            self.passed_mask = 0
-        self.vars_set_mask = 0
-        self.lines = []
-
-    def set_param_block_passed(self, param_block, passed):
-        if param_block.optional and passed:
-            self.passed_mask |= 1 << param_block.kw_passed_bit
-
-    def set_param_passed(self, param, passed):
-        if isinstance(param, symtable.Optional_parameter) and passed:
-            self.passed_mask |= 1 << param.passed_bit
-
-    def pair_param(self, param_block, param, expr):
-        self.lines.append(f'{param.variable.code} = {expr.code};')
-        self.vars_set_mask |= 1 << param.variable.set_bit
-
-    def compile(self, arguments, extra_indent):
-        symtable.pass_args(self.label, arguments[0], arguments[1], self)
-        extra_indent += 4
-        for line in self.lines:
-            print(' ' * extra_indent, line, sep='', file=C_file)
-        if self.passed_mask:
+            keyword = f'"{pb_name}"'
+        for i, arg in enumerate(args):
             print(' ' * extra_indent,
-                  f'{self.label.C_label_descriptor_name}.params_passed'
-                    f' = {hex(self.passed_mask)};',
+                  f'*({translate_type(arg.get_step().type.get_type())} *)'
+                  f'param_location({dest_label}, {keyword}, {i}) = '
+                  f'{arg.get_step().code};',
                   sep='', file=C_file)
-        if self.vars_set_mask:
-            print(' ' * extra_indent,
-                  f'{self.label.parent_namespace.C_descriptor_name}.vars_set'
-                    f' |= {hex(self.vars_set_mask)};',
-                  sep='', file=C_file)
+    write_pb(pos_args)
+    for keyword, args in kw_args:
+        write_pb(args, keyword)
 
 
 def write_goto_details(self, module, extra_indent):
-    if self.primary.immediate and \
-       isinstance(self.primary.value, symtable.Label):
-        label = self.primary.value
-        Label_param_compiler(label).compile(self.arguments, extra_indent)
-        print(' ' * extra_indent,
-              f'goto *{label.C_label_descriptor_name}.label;',
-              sep='', file=C_file)
-    else:
-        print(' ' * extra_indent,
-              f"    // FIX: Goto variable ...",
-              sep='', file=C_file)
+    extra_indent += 4
+    label = self.primary.get_step().code
+    print(' ' * extra_indent, f'({label})->params_passed = 0;',
+          sep='', file=C_file)
+    write_args(label, self.arguments[0], self.arguments[1], extra_indent)
+    print(' ' * extra_indent, f'goto *({label})->label;',
+          sep='', file=C_file)
 symtable.Goto.write_code_details = write_goto_details
 
 
 def write_return_details(self, module, extra_indent):
-    # FIX: do done too
+    write_done(self.from_opt, self.containing_label, extra_indent)
     print(' ' * extra_indent,
-          f"    // FIX: Return",
+          f"({self.dest_label})->params_passed = 0;",
+          sep='', file=C_file)
+    write_args(self.dest_label, self.arguments[0], self.arguments[1],
+               extra_indent)
+    print(' ' * extra_indent, f'goto *({self.dest_label})->label;',
           sep='', file=C_file)
 symtable.Return.write_code_details = write_return_details
 
@@ -385,15 +363,16 @@ symtable.Done_statement.write_code_details = write_done_details
 def write_done(done_label, containing_label, extra_indent):
     extra_indent += 4
     print(' ' * extra_indent,
-          f"if (!({done_label.C_label_descriptor_name}.params_passed"
-            " & FLAG_RUNNING)) {",
+          f"if (!(({done_label})->params_passed & FLAG_RUNNING)) {{",
           sep='', file=C_file)
     print(' ' * (extra_indent + 4),
           f"report_error(&{containing_label.C_label_descriptor_name},",
           sep='', file=C_file)
     print(' ' * (extra_indent + 4),
-          f'             "\'{done_label.name.value}\' not running -- '
-            'second return?");',
+          '            "\'%s\' not running -- second return?",',
+          sep='', file=C_file)
+    print(' ' * (extra_indent + 4),
+          f'             ({done_label})->name);',
           sep='', file=C_file)
     print(' ' * extra_indent, "}", sep='', file=C_file)
     print(' ' * extra_indent,

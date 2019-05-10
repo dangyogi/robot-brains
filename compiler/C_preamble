@@ -113,3 +113,51 @@ range_check(struct label_descriptor_s *containing_label,
     }
 }
 
+
+void *
+param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
+    // Returns the param_location for the indicated parameter.
+    //
+    // Pass keyword of NULL for the positional parameters.
+    //
+    // Applies the kw_mask to dest_label->params_passed.
+    // Applies the param_mask to dest_label->params_passed.
+    // Applies the var_set_mask to dest_label->module->vars_set.
+    //
+    // Parameter numbers start with 0 within each keyword block.
+
+    struct param_block_descriptor_s *pb;
+
+    if (keyword == NULL) {
+        pb = &dest_label->param_block_descriptors[0];
+    } else {
+        // Find keyword
+        //
+        // Applies its kw_mask to dest_label->params_passed.
+        for (i = 1; i < dest_label->num_param_blocks; i++) {
+            if (strcmp(dest_label->param_block_descriptors[i].name, keyword)
+                == 0)
+            {
+                dest_label->params_passed |= 
+                  dest_label->param_block_descriptors[i].kw_mask;
+                pb = &dest_label->param_block_descriptors[i];
+                goto found;
+            }
+        }
+        fprint(stderr, "Internal Error: KEYWORD, %s, not found\n", keyword);
+        exit(1);
+    }
+
+  found:
+    // Returns param_location for param n.
+    //
+    // Applies its param_mask to dest_label->params_passed.
+    // Applies its var_set_mask to dest_label->module->vars_set.
+    if (pb->num_required_params <= n) {
+        dest_label->params_passed |= \
+          pb.param_masks[n - pb->num_required_params];
+    }
+    dest_label->module->vars_set |= pb.var_set_masks[n];
+    return pb->param_locations[n];
+}
+

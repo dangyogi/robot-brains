@@ -1308,11 +1308,15 @@ class Return(Statement_with_arguments):
 
     def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
         super().do_pre_arg_check_prepare(module, last_label, last_fn_subr)
+        if self.from_opt is None:
+            assert last_fn_subr is not None
+            self.from_opt = last_fn_subr
         if self.to_opt is None:
             assert last_fn_subr is not None
-            self.last_fn_subr = last_fn_subr
+            self.dest_label = f"({last_fn_subr.get_step().code})->return_label"
             self.label_type = last_fn_subr.get_step().type.return_label_type
         else:
+            self.dest_label = self.to_opt.get_step().code
             self.label_type = self.to_opt.type.get_type()
 
 
@@ -1336,7 +1340,10 @@ class Call_statement(Statement_with_arguments):
     def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
         super().do_pre_arg_check_prepare(module, last_label, last_fn_subr)
         fn = self.primary.get_step()
+
+        # This is always verified to be a Label_type
         fn_type = fn.type.get_type()
+
         self.label_type = fn_type
 
         # set self.returning_to

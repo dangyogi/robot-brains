@@ -118,7 +118,7 @@ subroutine push_task task ?task_list: itask_list
     ======================================================================
     | YN | inum_tasks[itask_list] >= 100
     ======================================================================
-    | X  | abort "task list overflow"
+    | X  | goto abort "task list overflow"
     |  X | set tasks[inum_tasks[itask_list], itask_list] to: task
     |    | inum_tasks[itask_list] += 1
     |    | return
