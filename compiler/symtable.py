@@ -1411,6 +1411,7 @@ class Done_statement(Statement):
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
+        assert last_label is not None
         self.containing_label = last_label
         if self.ident is not None:
             self.label = lookup(self.ident, module)
@@ -1935,30 +1936,33 @@ class Call_fn(Expr):
 
     def __init__(self, fn, pos_arguments, kw_arguments):
         Expr.__init__(self, fn.lexpos, fn.lineno)
-        self.fn = fn
+        self.primary = fn
         self.pos_arguments = pos_arguments  # (primary, ...)
 
         # ((KEYWORD_TOKEN, (primary, ...)), ...)
         self.kw_arguments = kw_arguments 
 
     def __repr__(self):
-        return f"<Call_fn {self.fn} {self.pos_arguments} {self.kw_arguments}>"
+        return f"<Call_fn {self.primary} {self.pos_arguments} " \
+                f"{self.kw_arguments}>"
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         # self.type has to be done for each instance...
         super().do_prepare_step(module, last_label, last_fn_subr)
-        self.fn.prepare_step(module, last_label, last_fn_subr)
-        prep_statements = list(self.fn.prep_statements).copy()
-        self.vars_used = set(self.fn.vars_used).copy()
-        fn_type = self.fn.type.get_type()
+        assert last_label is not None
+        self.containing_label = last_label
+        self.primary.prepare_step(module, last_label, last_fn_subr)
+        prep_statements = list(self.primary.prep_statements).copy()
+        self.vars_used = set(self.primary.vars_used).copy()
+        fn_type = self.primary.type.get_type()
         if not isinstance(fn_type, Label_type) or \
            fn_type.label_type != 'function' or \
            len(fn_type.return_types[0][0]) != 1 or \
            fn_type.return_types[0][1] or \
            fn_type.return_types[1]:
             scanner.syntax_error("Must be a FUNCTION returning a single value",
-                                 self.fn.lexpos, self.fn.lineno,
-                                 self.fn.filename)
+                                 self.primary.lexpos, self.primary.lineno,
+                                 self.primary.filename)
         for expr in self.pos_arguments:
             expr.prepare_step(module, last_label, last_fn_subr)
             prep_statements.extend(expr.prep_statements)
@@ -1968,14 +1972,12 @@ class Call_fn(Expr):
                 expr.prepare_step(module, last_label, last_fn_subr)
                 prep_statements.extend(expr.prep_statements)
                 self.vars_used.update(expr.vars_used)
-        fn_type.satisfied_by_arguments(Error_reporter(self.fn),
+        fn_type.satisfied_by_arguments(Error_reporter(self.primary),
                                        self.pos_arguments, self.kw_arguments)
         self.type = fn_type.return_types[0][0][0]
         temp_var = last_label.get_temp(self.type)
         self.code = temp_var.code
-        ret_label = last_label.new_fn_ret_label(module, temp_var)
-        # FIX: add call to end of prep_statements
-        prep_statements.append(ret_label.decl_code)
+        self.ret_label = last_label.new_fn_ret_label(module, temp_var)
         self.prep_statements = tuple(prep_statements)
 
 
@@ -2192,6 +2194,7 @@ def lookup(ident, module, error_not_found=True):
     return None
 
 
+# FIX: Move this back to Use (and cook Use_param_compiler into it)?
 def pass_args(with_args, pos_args, kw_args, param_compiler):
     r'''
     param_compiler must have the following methods:

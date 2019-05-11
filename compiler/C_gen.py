@@ -213,14 +213,22 @@ def write_statement_code(self, module, extra_indent=0):
           sep='', file=C_file)
     self.write_check_running(extra_indent)
     check_all_vars_used(self.containing_label, self.vars_used, extra_indent)
-    for line in self.prep_statements:
-        print(' ' * extra_indent, "    ", line, sep='', file=C_file)
+    write_prep_statements(self.prep_statements, extra_indent)
 
     self.write_code_details(module, extra_indent)
 
     for line in self.post_statements:
         print(' ' * extra_indent, "    ", line, sep='', file=C_file)
 symtable.Statement.write_code = write_statement_code
+
+
+def write_prep_statements(prep_statements, extra_indent):
+    for line in prep_statements:
+        if isinstance(line, str):
+            print(' ' * extra_indent, "    ", line, sep='', file=C_file)
+        else:
+            line(extra_indent)
+
 
 def check_statement_running(self, extra_indent):
     pass
@@ -320,7 +328,7 @@ def write_return_details(self, module, extra_indent):
 symtable.Return.write_code_details = write_return_details
 
 
-def check_call_statement_running(self, extra_indent):
+def check_call_running(self, extra_indent):
     extra_indent += 4
     label = self.primary.get_step().code
     print(' ' * extra_indent,
@@ -336,7 +344,8 @@ def check_call_statement_running(self, extra_indent):
     print(' ' * extra_indent,
           f"({label})->params_passed = FLAG_RUNNING;",
           sep='', file=C_file)
-symtable.Call_statement.write_check_running = check_call_statement_running
+symtable.Call_statement.write_check_running = check_call_running
+symtable.Call_fn.write_check_running = check_call_running
 
 def write_call_details(self, module, extra_indent):
     primary = self.primary.get_step()
@@ -391,8 +400,7 @@ def write_dlt_code(self, module, extra_indent=0):
             f" = {self.conditions.lineno};",
           sep='', file=C_file)
     check_all_vars_used(label, self.conditions.vars_used, extra_indent)
-    for line in self.conditions.prep_statements:
-        print(' ' * extra_indent, "    ", line, sep='', file=C_file)
+    write_prep_statements(self.conditions.prep_statements, extra_indent)
     dlt_mask = f"{module.C_global_name}.{label.C_dlt_mask_name}"
     print(' ' * extra_indent, f"    {dlt_mask} = 0;", sep='', file=C_file)
     for i, expr in enumerate(reversed(self.conditions.exprs)):
@@ -560,8 +568,23 @@ def compile_got_param(self, module, last_label, last_fn_subr):
 
 @symtable.Call_fn.as_post_hook("prepare_step")
 def compile_call_fn(self, module, last_label, last_fn_subr):
-    # FIX Call_fn
-    pass
+    self.prep_statements = self.prep_statements + (self.write_call,)
+
+
+def write_call_fn_call(self, extra_indent):
+    self.write_check_running(extra_indent)
+    primary = self.primary.get_step()
+    label = primary.code
+    write_args(label, primary.type.get_type(),
+               self.pos_arguments, self.kw_arguments, extra_indent)
+    print(' ' * extra_indent,
+          f'    ({label})->return_label = {self.ret_label.code};',
+          sep='', file=C_file)
+    print(' ' * extra_indent, f'    goto *({label})->label;',
+          sep='', file=C_file)
+    print(' ' * extra_indent, f'  {self.ret_label.decl_code}',
+          sep='', file=C_file)
+symtable.Call_fn.write_call = write_call_fn_call
 
 
 @symtable.Unary_expr.as_post_hook("prepare_step")
