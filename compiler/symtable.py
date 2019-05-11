@@ -2239,7 +2239,8 @@ class Use_param_compiler:
         if expr.get_step().immediate:
             param.variable.immediate = True
             param.variable.value = expr.get_step().value
-            # FIX: need to set the bit in module.vars_set
+            # We can skip setting the bit in module.vars_set since there is no
+            # way to test those bits in the code...
 
 
 class Error_reporter:

@@ -27,6 +27,13 @@ var isAlive? is boolean
 var isActive? is boolean
 var isStarted? is boolean
 
+# FIX: temporary
+subroutine init
+    set isAlive? to: false?
+    set isActive? to: true?
+    set isStarted? to: true?
+    return
+
 
 label abort message$
     `fprintf(stderr, "%s\n", ` message$ `);`

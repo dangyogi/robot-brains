@@ -133,12 +133,17 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
 
     if (keyword == NULL) {
         pb = &dest_label->param_block_descriptors[0];
+        if (pb->name != NULL) {
+            fprintf(stderr, "Internal Error: pos param block not found\n");
+            exit(1);
+        }
     } else {
         // Find keyword
         //
         // Applies its kw_mask to dest_label->params_passed.
-        for (int i = 1; i < dest_label->num_param_blocks; i++) {
-            if (strcmp(dest_label->param_block_descriptors[i].name, keyword)
+        for (int i = 0; i < dest_label->num_param_blocks; i++) {
+            if (dest_label->param_block_descriptors[i].name != NULL &&
+                strcmp(dest_label->param_block_descriptors[i].name, keyword)
                 == 0)
             {
                 dest_label->params_passed |= 
@@ -147,7 +152,7 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
                 goto found;
             }
         }
-        fprintf(stderr, "Internal Error: KEYWORD, %s, not found\n", keyword);
+        fprintf(stderr, "Internal Error: KEYWORD, '%s', not found\n", keyword);
         exit(1);
     }
 
@@ -156,6 +161,18 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
     //
     // Applies its param_mask to dest_label->params_passed.
     // Applies its var_set_mask to dest_label->module->vars_set.
+    if (n >= pb->num_params) {
+        if (keyword == NULL) {
+            fprintf(stderr,
+              "Internal Error: pos params, %d greater than num params\n",
+              n);
+        } else {
+            fprintf(stderr,
+              "Internal Error: KEYWORD, '%s', %d greater than num params\n",
+              keyword, n);
+        }
+        exit(1);
+    }
     if (pb->num_required_params <= n) {
         dest_label->params_passed |= \
           pb->param_masks[n - pb->num_required_params];

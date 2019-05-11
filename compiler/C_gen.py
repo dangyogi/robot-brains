@@ -32,7 +32,7 @@ Module_descriptors = []
 Module_instances = []    # list of lines (without final commas)
 Init_labels = []
 Set_module_descriptor_pointers = []
-Initialize_module_parameters = []     # FIX: implement
+Initialize_module_parameters = []
 Module_code = []
 
 
@@ -124,6 +124,7 @@ def assign_module_names(m):
     m.C_descriptor_name = m.C_global_name + "__desc"
     m.C_label_descriptor_name = m.C_global_name + "__label_desc"
     m.C_struct_name = m.C_global_name + "__instance_s"
+    m.code = '&' + m.C_descriptor_name
 
     # list of fns that write elements into the module struct definition
 
@@ -199,6 +200,13 @@ def write_module_label_descriptor(module):
 def write_module_code(module):
     for step in module.steps:
         step.write_code(module)
+
+
+@todo_with_args(symtable.Use, "prepare_used_module",
+                Initialize_module_parameters)
+def write_use_args(self, module):
+    write_args('&' + self.module.C_label_descriptor_name,
+               self.module.params_type, self.pos_arguments, self.kw_arguments)
 
 
 def write_label_code(label, module, extra_indent=0):
@@ -285,7 +293,7 @@ def write_native_details(self, module, extra_indent):
 symtable.Native_statement.write_code_details = write_native_details
 
 
-def write_args(dest_label, label_type, pos_args, kw_args, extra_indent):
+def write_args(dest_label, label_type, pos_args, kw_args, extra_indent=4):
     def write_pb(req_types, opt_types, args, pb_name=None):
         if pb_name is None:
             keyword = 'NULL'
@@ -300,7 +308,7 @@ def write_args(dest_label, label_type, pos_args, kw_args, extra_indent):
     write_pb(label_type.required_params, label_type.optional_params, pos_args)
     for keyword, args in kw_args:
         opt, req_types, opt_types = label_type.kw_params[keyword]
-        write_pb(req_types, opt_types, args, keyword)
+        write_pb(req_types, opt_types, args, keyword.value)
 
 
 def write_goto_details(self, module, extra_indent):
@@ -743,7 +751,7 @@ Types = {
     "integer": "long",
     "boolean": "char",
     "string": "char *",
-    "module": "struct module_instance_s *",
+    "module": "struct module_descriptor_s *",
 }
 
 
