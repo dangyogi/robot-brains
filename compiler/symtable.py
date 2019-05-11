@@ -318,17 +318,27 @@ class Typedef(Entity):
     def __repr__(self):
         return f"<Typedef {self.name.value} {self.type}>"
 
+    def cmp_params(self):
+        return (self.module.filename, self.name.value.lower())
+
     def dump_details(self, f):
         super().dump_details(f)
         print(f" type={self.type}", end='', file=f)
 
     def do_prepare(self, module):
         super().do_prepare(module)
+        self.module = module
         self.type.prepare(module)
 
 
 class Type(Symtable):
     any_type = False
+
+    def __eq__(self, b):
+        return type(self) == type(b) and self.cmp_params() == b.cmp_params()
+
+    def __hash__(self):
+        return hash((self.__class__, self.cmp_params()))
 
     def get_type(self):
         return self
@@ -379,6 +389,9 @@ class Builtin_type(Type):
     def __str__(self):
         return self.name.upper()
 
+    def cmp_params(self):
+        return self.name.lower()
+
     def is_numeric(self):
         return self.name in ('float', 'integer')
 
@@ -414,6 +427,9 @@ class Typename_type(Type):
 
     def __str__(self):
         return self.ident.value
+
+    def cmp_params(self):
+        return self.typedef.cmp_params()
 
     def get_type(self):
         r'Only valid after prepared.'
@@ -498,6 +514,16 @@ class Label_type(Type):
 
     def __str__(self):
         return self.label_type.upper()
+
+    def cmp_params(self):
+        ans = [self.label_type, self.required_params, self.optional_params,
+               tuple(sorted((kw.value.lower(), rest)
+                            for kw, rest in self.kw_params.items()))]
+        if self.label_type == 'function':
+            ans.append((self.return_types[0],
+                        tuple(sorted((kw.value.lower(), rest)
+                                     for kw, rest in self.return_types[1]))))
+        return tuple(ans)
 
     def do_prepare(self, module):
         super().do_prepare(module)
@@ -1095,14 +1121,20 @@ class Label(With_parameters, Step, Entity):
             ans = available_vars.pop()
         else:
             self.last_temp_number += 1
-            ans = Variable(
-                    scanner.Token.dummy(
-                      f"__{self.name.value}__temp_{self.last_temp_number}"),
-                    self.parent_namespace,
-                    type=type)
+            ans = self.create_variable(
+                         f"__{self.name.value}__temp_{self.last_temp_number}",
+                         type)
             ans.prepare(self.parent_namespace)
             self.temps[type.get_type()].add(ans)
         self.temps_taken.add(ans)
+        return ans
+
+    def create_variable(self, name, type):
+        ans = Variable(
+                scanner.Token.dummy(name),
+                self.parent_namespace,
+                type=type)
+        ans.prepare(self.parent_namespace)
         return ans
 
     def need_dlt_mask(self):

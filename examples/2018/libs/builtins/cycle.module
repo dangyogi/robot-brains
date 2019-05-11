@@ -14,7 +14,8 @@ dim tasks[100, 2]
 dim inum_tasks[2]
 
 
-subroutine run
+function irun
+    # Returns exit_status to return from main.
     run_all "init"
     goto wait_for_start
 
@@ -25,12 +26,12 @@ subroutine run
     ======================================================================
     |  X  | goto wait_for_start
     |   X | run_all "start"
-    | X   | goto run_stop
+    | X   | goto terminate 0
     ======================================================================
 
-  label run_stop
+  label terminate iexit_status
     run_all "stop"
-    return
+    return iexit_status
 
 
 subroutine run_all name$

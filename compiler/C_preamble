@@ -10,6 +10,9 @@
 // strcmp
 #include <string.h>
 
+// setjmp/longjmp
+#include <setjmp.h>
+
 
 struct label_descriptor_s {
     /////////////// initialized outside of main:
@@ -69,6 +72,23 @@ struct module_descriptor_s {      // initialized outside main
 #define FLAG_RUNNING            0x01
 
 
+// to get back into main
+jmp_buf longjmp_to_main;
+int longjmp_to_main_set = 0;
+int Exit_status;
+
+
+void
+terminate(int exit_status) {
+    if (longjmp_to_main_set) {
+        Exit_status = exit_status;
+        longjmp(longjmp_to_main, 1);
+    } else {
+        exit(exit_status);
+    }
+}
+
+
 void
 report_error(struct label_descriptor_s *containing_label, char *format, ...) {
     va_list args;
@@ -78,7 +98,7 @@ report_error(struct label_descriptor_s *containing_label, char *format, ...) {
             containing_label->module->name, containing_label->lineno);
     vfprintf(stderr, format, args);
     va_end(args);
-    exit(1);
+    terminate(1);
 }
 
 
@@ -135,7 +155,7 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
         pb = &dest_label->param_block_descriptors[0];
         if (pb->name != NULL) {
             fprintf(stderr, "Internal Error: pos param block not found\n");
-            exit(1);
+            terminate(1);
         }
     } else {
         // Find keyword
@@ -153,7 +173,7 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
             }
         }
         fprintf(stderr, "Internal Error: KEYWORD, '%s', not found\n", keyword);
-        exit(1);
+        terminate(1);
     }
 
   found:
@@ -171,7 +191,7 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
               "Internal Error: KEYWORD, '%s', %d greater than num params\n",
               keyword, n);
         }
-        exit(1);
+        terminate(1);
     }
     if (pb->num_required_params <= n) {
         dest_label->params_passed |= \

@@ -73,21 +73,50 @@ def create_cycle_run_code():
         print("Could not find 'cycle' module", file=sys.stderr)
         sys.exit(1)
     cycle = cycle.get_step()
-    run = cycle.lookup(Token.dummy('run'), error_not_found=False)
-    if run is None or not isinstance(run.get_step(), symtable.Subroutine):
-        print("Could not find 'run' subroutine in 'cycle' module",
+    run = cycle.lookup(Token.dummy('irun'), error_not_found=False)
+    if run is None or not isinstance(run.get_step(), symtable.Function):
+        print("Could not find 'irun' function in 'cycle' module",
               file=sys.stderr)
         sys.exit(1)
     run = run.get_step()
-    done_label = run.new_subr_ret_label(run.parent_namespace)
+    if run.pos_param_block is not None or run.kw_parameters:
+        print("'cycle.irun' must not take any parameters", file=sys.stderr)
+        sys.exit(1)
+    integer = symtable.Builtin_type('integer')
+    if run.return_types != (((integer,), ()), ()):
+        print("'cycle.irun' must only return an INTEGER", file=sys.stderr)
+        sys.exit(1)
+    var = run.create_variable('__exit_status__', integer)
+    done_label = run.new_fn_ret_label(run.parent_namespace, var)
+    terminate = cycle.lookup(Token.dummy('terminate'), error_not_found=False)
+    if terminate is None or type(terminate.get_step()) is not symtable.Label:
+        print("Could not find 'terminate' label in 'cycle' module",
+              file=sys.stderr)
+        sys.exit(1)
+    terminate = terminate.get_step()
+    if terminate.pos_param_block is None or \
+       len(terminate.pos_param_block.required_params) != 1 or \
+       terminate.pos_param_block.required_params[0].type != integer or \
+       terminate.pos_param_block.optional_params or \
+       terminate.kw_parameters:
+        print("'cycle.terminate' must only take an INTEGER parameter",
+              file=sys.stderr)
+        sys.exit(1)
     Cycle_run_code = (
+        "    if (setjmp(longjmp_to_main)) {",
+        "        longjmp_to_main_set = 1;",
+        f"        {terminate.C_label_descriptor_name}.params_passed = 0;",
+        f"        *(int *)param_location({terminate.code}, NULL, 0) = " \
+                      "Exit_status;",
+        f"        goto *{terminate.C_label_descriptor_name}.label;",
+        "    }",
         f"    {run.C_label_descriptor_name}.params_passed = FLAG_RUNNING;",
         f"    {run.C_label_descriptor_name}.return_label = " \
                 f"&{done_label.C_label_descriptor_name};",
         f"    goto *{run.C_label_descriptor_name}.label;",
         f"",
         f"  {done_label.decl_code}",
-        "    return 0;",
+        f"    return {var.code};",
     )
 
 
