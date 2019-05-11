@@ -62,6 +62,9 @@ def start_main():
     print(file=C_file)
     print("int", file=C_file)
     print("main(int argc, char *argv[], char *env[]) {", file=C_file)
+    print("    my_set_signal(SIGINT, my_handler);", file=C_file)
+    print("    my_set_signal(SIGTERM, my_handler);", file=C_file)
+    # FIX: ignore SIGHUP?
 
 
 @todo(Gen_step_code)

@@ -13,6 +13,9 @@
 // setjmp/longjmp
 #include <setjmp.h>
 
+// sigaction
+#include <signal.h>
+
 
 struct label_descriptor_s {
     /////////////// initialized outside of main:
@@ -86,6 +89,24 @@ terminate(int exit_status) {
     } else {
         exit(exit_status);
     }
+}
+
+
+void
+my_set_signal(int signum, void (*handler)(int)) {
+    struct sigaction my_sigaction;
+    sigset_t block_mask;
+
+    sigfillset(&block_mask);  // includes all defined signals
+    my_sigaction.sa_handler = handler;
+    my_sigaction.sa_mask = block_mask;
+    my_sigaction.sa_flags = 0;
+    sigaction(signum, &my_sigaction, NULL);
+}
+
+void
+my_handler(int signum) {
+    terminate(128 + signum);
 }
 
 
