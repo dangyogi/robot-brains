@@ -78,7 +78,11 @@ def wrap(expr, precedence, side):
 
 
 def compile_unary(op, expr):
-    return Unary_exprs[op](expr)
+    return Target_language.Unary_exprs[op.upper()](expr)
+
+
+def compile_binary(expr1, op, expr2):
+    return Target_language.Binary_exprs[op.upper()](expr1, expr2)
 
 
 def unary(op, format, expr): 

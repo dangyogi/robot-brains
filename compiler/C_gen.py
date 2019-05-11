@@ -10,7 +10,7 @@ import symtable
 from scanner import Token, syntax_error
 from code_generator import (
     todo, todo_with_args, translate_name, translate_type, unary, binary,
-    subscript, relative_path, wrap,
+    subscript, relative_path, wrap, compile_unary, compile_binary,
 )
 
 
@@ -401,8 +401,8 @@ symtable.Call_statement.write_code_details = write_call_details
 
 
 def write_opeq_details(self, module, extra_indent):
-    _, _, code = Binary_exprs[self.operator.split('=')[0]](self.lvalue,
-                                                           self.expr)
+    _, _, code = compile_binary(self.lvalue, self.operator.split('=')[0],
+                                self.expr)
     print(' ' * extra_indent, f"    {self.lvalue.code} = {code};",
           sep='', file=C_file)
 symtable.Opeq_statement.write_code_details = write_opeq_details
@@ -638,7 +638,7 @@ def compile_unary_expr(self, module, last_label, last_fn_subr):
             self.code = repr(self.value)
     else:
         self.precedence, self.assoc, self.code = \
-          Unary_exprs[self.operator](self.expr)
+          compile_unary(self.operator, self.expr)
 
 
 @symtable.Binary_expr.as_post_hook("prepare_step")
@@ -656,7 +656,7 @@ def compile_binary_expr(self, module, last_label, last_fn_subr):
             self.code = f'"{escaped_str}"'
     else:
         self.precedence, self.assoc, self.code = \
-          Binary_exprs[self.operator](self.expr1, self.expr2)
+          compile_binary(self.expr1, self.operator, self.expr2)
 
 
 @symtable.Return_label.as_post_hook("prepare_step")
@@ -742,8 +742,8 @@ Reserved_words = frozenset((
 def gen_abs(expr):
     precedence, assoc = Precedence_lookup['(']
     if expr.type.is_integer():
-        return precedence, assoc, f"abs({expr})"
-    return precedence, assoc, f"fabs({expr})"
+        return precedence, assoc, f"abs({expr.get_step().code})"
+    return precedence, assoc, f"fabs({expr.get_step().code})"
 
 
 Unary_exprs = {

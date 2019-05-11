@@ -378,6 +378,27 @@ class Type(Symtable):
 class Any_type(Type):
     any_type = True
 
+    def __str__(self):
+        return "Any_type"
+
+    def is_numeric(self):
+        return True
+
+    def is_integer(self):
+        return True
+
+    def is_float(self):
+        return True
+
+    def is_string(self):
+        return True
+
+    def is_boolean(self):
+        return True
+
+    def is_module(self):
+        return True
+
 
 class Builtin_type(Type):
     def __init__(self, name):
@@ -2031,7 +2052,7 @@ class Unary_expr(Expr):
                                      self.expr.lexpos, self.expr.lineno,
                                      self.expr.filename)
             self.type = self.expr.type
-            if self.expr.get_step().immedate:
+            if self.expr.get_step().immediate:
                 self.immediate = True
                 if self.operator == '-':
                     self.value = -self.expr.get_step().value
@@ -2043,7 +2064,7 @@ class Unary_expr(Expr):
                                      self.expr.lexpos, self.expr.lineno,
                                      self.expr.filename)
             self.type = Builtin_type("boolean")
-            if self.expr.get_step().immedate:
+            if self.expr.get_step().immediate:
                 self.immediate = True
                 self.value = not self.expr.get_step().value
         else:
@@ -2099,46 +2120,45 @@ class Binary_expr(Expr):
 
         if arg_type == 'integer':
             if not self.expr1.is_integer():
-                scanner.syntax_error(f"Expected {arg_type} type",
-                                     self.expr1.lexpos, self.expr1.lineno,
-                                     self.expr1.filename)
+                scanner.syntax_error(
+                  f"Expected INTEGER type, got {self.expr1.get_step().type}",
+                  self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
             if not self.expr2.is_integer():
-                scanner.syntax_error(f"Expected {arg_type} type",
-                                     self.expr2.lexpos, self.expr2.lineno,
-                                     self.expr2.filename)
+                scanner.syntax_error(
+                  f"Expected INTEGER type, got {self.expr2.get_step().type}",
+                  self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
         elif arg_type == 'float':    # at least one has to be float
             if not self.expr1.is_numeric():
-                scanner.syntax_error("Expected number type",
-                                     self.expr1.lexpos, self.expr1.lineno,
-                                     self.expr1.filename)
+                scanner.syntax_error(
+                  f"Expected number type, got {self.expr1.get_step().type}",
+                  self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
             if not self.expr2.is_numeric():
-                scanner.syntax_error("Expected number type",
-                                     self.expr2.lexpos, self.expr2.lineno,
-                                     self.expr2.filename)
+                scanner.syntax_error(
+                  f"Expected number type, got {self.expr2.get_step().type}",
+                  self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
             if not self.expr1.is_float() and not self.expr2.is_float():
-                scanner.syntax_error(f"Expected {arg_type} type",
+                scanner.syntax_error(
+                  f"Expected FLOAT type, got {self.expr1.get_step().type}",
                                      self.expr1.lexpos, self.expr1.lineno,
                                      self.expr1.filename)
         elif arg_type == 'number':
             if not self.expr1.is_numeric():
-                scanner.syntax_error("Expected number type",
-                                     self.expr1.lexpos, self.expr1.lineno,
-                                     self.expr1.filename)
+                scanner.syntax_error(
+                  f"Expected number type, got {self.expr1.get_step().type}",
+                  self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
             if not self.expr2.is_numeric():
-                scanner.syntax_error("Expected number type",
-                                     self.expr2.lexpos, self.expr2.lineno,
-                                     self.expr2.filename)
+                scanner.syntax_error(
+                  f"Expected number type, got {self.expr2.get_step().type}",
+                  self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
         elif arg_type == 'number or string':
             if not self.expr1.is_numeric() and not self.expr1.is_string():
-                scanner.syntax_error(f"Expected {arg_type} type, "
-                                       f"got {self.expr1.type}",
-                                     self.expr1.lexpos, self.expr1.lineno,
-                                     self.expr1.filename)
+                scanner.syntax_error(
+                  f"Expected {arg_type} type, got {self.expr1.get_step().type}",
+                  self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
             if not self.expr2.is_numeric() and not self.expr2.is_string():
-                scanner.syntax_error(f"Expected {arg_type} type, "
-                                       f"got {self.expr2.type}",
-                                     self.expr2.lexpos, self.expr2.lineno,
-                                     self.expr2.filename)
+                scanner.syntax_error(
+                  f"Expected {arg_type} type, got {self.expr2.get_step().type}",
+                  self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
             if self.expr1.is_numeric() and not self.expr2.is_numeric() or \
                self.expr1.is_string() and not self.expr2.is_string():
                 scanner.syntax_error(
@@ -2194,6 +2214,8 @@ class Return_label(Expr):
 
 
 class Native_expr(Native, Expr):
+    precedence = 100
+    assoc = None
     type = Any_type()
 
     def __init__(self, lexpos, lineno, native_elements):
@@ -2202,6 +2224,7 @@ class Native_expr(Native, Expr):
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
+        self.code = f"({self.code})"
 
 
 def indent_str(indent):

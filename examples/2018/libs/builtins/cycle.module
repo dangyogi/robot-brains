@@ -16,6 +16,7 @@ dim inum_tasks[2]
 
 function irun
     # Returns exit_status to return from main.
+
     run_all "init"
     goto wait_for_start
 
@@ -30,6 +31,7 @@ function irun
     ======================================================================
 
   label terminate iexit_status
+    # Expected by C routines.  Used instead of exit to run "stop" routines.
     run_all "stop"
     return iexit_status
 
@@ -139,4 +141,5 @@ subroutine schedule subr
 
 
 subroutine delay secs
+    # FIX
     return

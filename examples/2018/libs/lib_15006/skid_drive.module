@@ -26,7 +26,7 @@ function get_position ? start
     =============================================================
     set position to:
     -> (({left_motor.position} + {right_motor.position}) / 2 * 66.7 - start)
-    telemetry.report key: "position" value: position
+    telemetry.report_float key: "position" value: position
     return position
 
 
