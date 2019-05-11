@@ -78,6 +78,7 @@ def p_second(p):
     const_expr : '(' const_expr ')'
     returning_opt : RETURNING parameter_types
     taking_opt : TAKING parameter_types
+    from_opt : FROM primary
     label_decl : FUNCTION fn_name parameters set_returning_opt newlines
                | SUBROUTINE sub_name parameters newlines
                | LABEL label_name parameters newlines
@@ -173,7 +174,6 @@ def p_all(p):
     arguments : pos_arguments kw_arguments
     kw_argument : KEYWORD pos_arguments
     parameter_types : pos_parameter_types kw_parameter_types
-    from_opt : FROM primary
     """
     p[0] = tuple(p[1:])
 

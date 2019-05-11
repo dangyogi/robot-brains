@@ -4,7 +4,7 @@ import sys
 import os.path
 import operator
 from functools import partial
-from itertools import groupby
+from itertools import chain, groupby
 
 import symtable
 from scanner import Token, syntax_error
@@ -272,29 +272,37 @@ def write_set_details(self, module, extra_indent):
 symtable.Set.write_code_details = write_set_details
 
 
-def write_args(dest_label, pos_args, kw_args, extra_indent):
-    def write_pb(args, pb_name=None):
+def write_native_details(self, module, extra_indent):
+    print(' ' * extra_indent, self.code, sep='', file=C_file)
+symtable.Native_statement.write_code_details = write_native_details
+
+
+def write_args(dest_label, label_type, pos_args, kw_args, extra_indent):
+    def write_pb(req_types, opt_types, args, pb_name=None):
         if pb_name is None:
             keyword = 'NULL'
         else:
             keyword = f'"{pb_name}"'
-        for i, arg in enumerate(args):
+        for i, (type, arg) in enumerate(zip(chain(req_types, opt_types), args)):
             print(' ' * extra_indent,
-                  f'*({translate_type(arg.get_step().type.get_type())} *)'
+                  f'*({translate_type(type)} *)'
                   f'param_location({dest_label}, {keyword}, {i}) = '
                   f'{arg.get_step().code};',
                   sep='', file=C_file)
-    write_pb(pos_args)
+    write_pb(label_type.required_params, label_type.optional_params, pos_args)
     for keyword, args in kw_args:
-        write_pb(args, keyword)
+        opt, req_types, opt_types = label_type.kw_params[keyword]
+        write_pb(req_types, opt_types, args, keyword)
 
 
 def write_goto_details(self, module, extra_indent):
     extra_indent += 4
-    label = self.primary.get_step().code
+    primary = self.primary.get_step()
+    label = primary.code
     print(' ' * extra_indent, f'({label})->params_passed = 0;',
           sep='', file=C_file)
-    write_args(label, self.arguments[0], self.arguments[1], extra_indent)
+    write_args(label, primary.type.get_type(),
+               self.arguments[0], self.arguments[1], extra_indent)
     print(' ' * extra_indent, f'goto *({label})->label;',
           sep='', file=C_file)
 symtable.Goto.write_code_details = write_goto_details
@@ -305,8 +313,8 @@ def write_return_details(self, module, extra_indent):
     print(' ' * extra_indent,
           f"({self.dest_label})->params_passed = 0;",
           sep='', file=C_file)
-    write_args(self.dest_label, self.arguments[0], self.arguments[1],
-               extra_indent)
+    write_args(self.dest_label, self.label_type,
+               self.arguments[0], self.arguments[1], extra_indent)
     print(' ' * extra_indent, f'goto *({self.dest_label})->label;',
           sep='', file=C_file)
 symtable.Return.write_code_details = write_return_details
@@ -326,22 +334,20 @@ def check_call_statement_running(self, extra_indent):
           sep='', file=C_file)
     print(' ' * extra_indent, "}", sep='', file=C_file)
     print(' ' * extra_indent,
-          f"({label})->params_passed |= FLAG_RUNNING;",
+          f"({label})->params_passed = FLAG_RUNNING;",
           sep='', file=C_file)
 symtable.Call_statement.write_check_running = check_call_statement_running
 
 def write_call_details(self, module, extra_indent):
-    if self.primary.immediate and \
-         isinstance(self.primary.value, symtable.Label):
-        label = self.primary.value
-        Label_param_compiler(label).compile(self.arguments, extra_indent)
-        print(' ' * extra_indent,
-              f'goto *{label.C_label_descriptor_name}.label;',
-              sep='', file=C_file)
-    else:
-        print(' ' * extra_indent,
-              f"    // FIX: Call_statement variable ...",
-              sep='', file=C_file)
+    primary = self.primary.get_step()
+    label = primary.code
+    write_args(label, primary.type.get_type(),
+               self.arguments[0], self.arguments[1], extra_indent)
+    print(' ' * extra_indent,
+          f'({label})->return_label = {self.returning_to.code};',
+          sep='', file=C_file)
+    print(' ' * extra_indent, f'goto *({label})->label;',
+          sep='', file=C_file)
 symtable.Call_statement.write_code_details = write_call_details
 
 
@@ -359,9 +365,10 @@ symtable.Done_statement.write_code_details = write_done_details
 
 
 def write_done(done_label, containing_label, extra_indent):
+    done_label_code = done_label.get_step().code
     extra_indent += 4
     print(' ' * extra_indent,
-          f"if (!(({done_label})->params_passed & FLAG_RUNNING)) {{",
+          f"if (!(({done_label_code})->params_passed & FLAG_RUNNING)) {{",
           sep='', file=C_file)
     print(' ' * (extra_indent + 4),
           f"report_error(&{containing_label.C_label_descriptor_name},",
@@ -370,12 +377,11 @@ def write_done(done_label, containing_label, extra_indent):
           '            "\'%s\' not running -- second return?",',
           sep='', file=C_file)
     print(' ' * (extra_indent + 4),
-          f'             ({done_label})->name);',
+          f'             ({done_label_code})->name);',
           sep='', file=C_file)
     print(' ' * extra_indent, "}", sep='', file=C_file)
     print(' ' * extra_indent,
-          f"{done_label.C_label_descriptor_name}.params_passed"
-            " &= ~FLAG_RUNNING;",
+          f"({done_label_code})->params_passed &= ~FLAG_RUNNING;",
           sep='', file=C_file)
 
 

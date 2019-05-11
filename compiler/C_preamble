@@ -7,6 +7,9 @@
 // exit
 #include <stdlib.h>
 
+// strcmp
+#include <string.h>
+
 
 struct label_descriptor_s {
     /////////////// initialized outside of main:
@@ -134,7 +137,7 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
         // Find keyword
         //
         // Applies its kw_mask to dest_label->params_passed.
-        for (i = 1; i < dest_label->num_param_blocks; i++) {
+        for (int i = 1; i < dest_label->num_param_blocks; i++) {
             if (strcmp(dest_label->param_block_descriptors[i].name, keyword)
                 == 0)
             {
@@ -144,7 +147,7 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
                 goto found;
             }
         }
-        fprint(stderr, "Internal Error: KEYWORD, %s, not found\n", keyword);
+        fprintf(stderr, "Internal Error: KEYWORD, %s, not found\n", keyword);
         exit(1);
     }
 
@@ -155,9 +158,9 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
     // Applies its var_set_mask to dest_label->module->vars_set.
     if (pb->num_required_params <= n) {
         dest_label->params_passed |= \
-          pb.param_masks[n - pb->num_required_params];
+          pb->param_masks[n - pb->num_required_params];
     }
-    dest_label->module->vars_set |= pb.var_set_masks[n];
+    dest_label->module->vars_set |= pb->var_set_masks[n];
     return pb->param_locations[n];
 }
 

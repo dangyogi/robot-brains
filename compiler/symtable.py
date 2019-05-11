@@ -1202,21 +1202,18 @@ class Native:
         super().do_prepare_step(module, last_label, last_fn_subr)
         prep_statements = []
         self.vars_used = set()
+        segments = []
         for element in self.native_elements:
             if isinstance(element, Expr):
                 element.prepare_step(module, last_label, last_fn_subr)
                 self.vars_used.update(element.vars_used)
                 prep_statements.extend(element.prep_statements)
-        self.prep_statements = tuple(prep_statements)
-
-    def gen_code(self):
-        segments = []
-        for element in self.native_elements:
-            if isinstance(element, str):
-                segments.append(element)
-            else:
                 segments.append(element.get_step().code)
-        return ''.join(segments)
+            else:
+                assert isinstance(element, str)
+                segments.append(element)
+        self.prep_statements = tuple(prep_statements)
+        self.code = ''.join(segments)
 
 
 class Native_statement(Native, Statement):
@@ -1269,8 +1266,8 @@ class Return(Statement_with_arguments):
     def __init__(self, lexpos, lineno, *args):
         Statement.__init__(self, lexpos, lineno, *args)
         self.arguments = self.args[0]
-        self.from_opt = self.args[1]
-        self.to_opt = self.args[2]
+        self.from_opt = self.args[1]    # done processing
+        self.to_opt = self.args[2]      # where the arguments are delivered
         self.error_reporter = Error_reporter(self)
 
     def is_final(self):
@@ -1282,9 +1279,9 @@ class Return(Statement_with_arguments):
             assert last_fn_subr is not None
             self.from_opt = last_fn_subr
         if self.to_opt is None:
-            assert last_fn_subr is not None
-            self.dest_label = f"({last_fn_subr.get_step().code})->return_label"
-            self.label_type = last_fn_subr.get_step().type.return_label_type
+            self.to_opt = self.from_opt
+            self.dest_label = f"({self.to_opt.get_step().code})->return_label"
+            self.label_type = self.to_opt.get_step().type.return_label_type
         else:
             self.dest_label = self.to_opt.get_step().code
             self.label_type = self.to_opt.type.get_type()
@@ -2168,6 +2165,9 @@ class Native_expr(Native, Expr):
     def __init__(self, lexpos, lineno, native_elements):
         Expr.__init__(self, lexpos, lineno)
         Native.__init__(self, native_elements)
+
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
 
 
 def indent_str(indent):
