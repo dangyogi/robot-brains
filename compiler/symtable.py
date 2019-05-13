@@ -1642,6 +1642,7 @@ class DLT_MAP(Step):
                     scanner.syntax_error("Duplicate action for column",
                                          self.map.lexpos + i, self.map.lineno)
                 self.column_numbers.append(i)
+                seen.add(i)
 
     def apply_offset(self, conditions):
         r'''Subtracts offset from each column_number in self.column_numbers.

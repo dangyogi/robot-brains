@@ -17,7 +17,7 @@ type c_config_s_t is subroutine taking ?p_next: p_next_t ?p_done: p_done_t
 var mod is module
 
 
-function gen_all_subroutines returning p_config_s_t
+function gen_all_subroutines name$ returning p_config_s_t
     var p_next_s is p_next_t
 
     # *_s: interface to my consumer
@@ -44,7 +44,7 @@ function gen_all_subroutines returning p_config_s_t
 
   ################### *_m: my interface to module.gen_modules #############
   label c_yield_m mod
-    set p_config_s2 to: {gen_subroutines mod}
+    set p_config_s2 to: {gen_subroutines mod name$}
     set p_config_s2_set? to: true?
     p_config_s2 c_yield: c_yield_s      # send subrs to my consumer
              -> c_done: p_next_m_shim   # get next module
@@ -111,7 +111,7 @@ function gen_all_subroutines returning p_config_s_t
     ========================================================================
 
 
-function gen_subroutines mod returning p_config_s_t
+function gen_subroutines mod name$ returning p_config_s_t
     # Generates all of the subroutines not requiring any parameters
     set ilabel to: 0
     goto return_label p_config
@@ -127,14 +127,15 @@ function gen_subroutines mod returning p_config_s_t
   
   label check_type
     =============================================================
-    | YYN | `` mod `->labels[` ilabel `]->type` == "subroutine"
-    | YN- | {requires_params? (`` mod `->labels[` ilabel `]`)}
+    | YYYN | `` mod `->labels[` ilabel `]->type` == "subroutine"
+    | YYN- | `` mod `->labels[` ilabel `]->name` == name$
+    | YN-- | {requires_params? (`` mod `->labels[` ilabel `]`)}
     =============================================================
-    |  X  | set i to: ilabel
-    |     | ilabel += 1
-    |     | goto c_yield (`` mod `->labels[` i `]`)
-    | X X | ilabel += 1
-    |     | goto p_next
+    |  X   | set i to: ilabel
+    |      | ilabel += 1
+    |      | goto c_yield (`` mod `->labels[` i `]`)
+    | X XX | ilabel += 1
+    |      | goto p_next
     =============================================================
   
   subroutine p_done

@@ -15,158 +15,151 @@ dim inum_tasks[2]
 
 function irun
     # Returns exit_status to be returned from main.
-    telemetry.report_string key: "irun" value: "called"
-    set p_config to: {labels.gen_all_subroutines}
-    p_config c_yield: c_yield c_done: c_done c_config: c_config
-    goto p_next
+    telemetry.report_string key: "irun" value: "called, doing run_all 'init'"
 
-  label c_yield sub
-    var sub is subr_t
-    var mod is module
-    set mod to: {labels.get_subr_module sub}
-    set mod_name$ to: {modules.get_module_name$ mod}
-    telemetry.report_string key: "irun, module name" value: mod_name$
-    set subr_name$ to: {labels.get_subr_name$ sub}
-    telemetry.report_string key: "irun, subr name" value: subr_name$
-    goto p_next
+    run_all "init"
+    telemetry.report_string key: "irun" value: "init done"
+    goto wait_for_start
 
-  label c_done
-    telemetry.report_string key: "irun" value: "done"
-    goto terminate 0
-
-  subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
-    var p_next is p_next_t
-    var p_done is p_done_t
-    return
-
-#    run_all "init"
-#    telemetry.report_string key: "irun" value: "init done"
-#    goto wait_for_start
-#
-#  label wait_for_start
-#    ======================================================================
-#    | NYY | isAlive?
-#    | -NY | isStarted?
-#    ======================================================================
-#    |  X  | goto wait_for_start
-#    |   X | run_all "start"
-#    | X   | goto terminate 0
-#    ======================================================================
+  label wait_for_start
+    ======================================================================
+    | NYY | isStarted?
+    | -YN | isActive?
+    ======================================================================
+    | X   | goto wait_for_start
+    |  X  | run_all "start"
+    |   X | goto terminate 0
+    ======================================================================
 
   label terminate iexit_status
     # Expected by C routines.  Used instead of exit to run "stop" routines.
-#    run_all "stop"
-    return iexit_status from: irun
+    run_all "stop"
+    return iexit_status
 
 
-#subroutine run_all name$
-#    var next_subr is subr_t
-#    var p_config is p_config_s_t
-#
-#    telemetry.report_string key: "run_all" value: name$
-#
-#    set i_current to: 0
-#    set i_next to: 1
-#    set i_task to: 0
-#    set inum_tasks[0] to: 0
-#    set inum_tasks[1] to: 0
-#
-#    set p_config to: {get_subroutines_by_name name$}
-#
-#    # This calls c_config before returning:
-#    p_config c_yield: c_yield c_done: c_done c_config: c_config
-#
-#    goto p_next
-#
-#
-#subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
-#    # This only gets called while the producer is still active, so always
-#    # update what_next.
-#    var p_next is label_t
-#    var p_done is subr_t
-#    set what_next to: p_next 
-#    return
-#
-#
-#  label c_yield next_subr
-#    telemetry.report_string key: "c_yield" value: "calling next_subr"
-#    next_subr returning_to: what_next
-#
-#
-#  label c_done
-#    telemetry.report_string key: "c_done" value: "called"
-#    set what_next to: run_next_task 
-#    goto run_task
-#
-#
-#  label swap_task_lists
-#    # swap i_next into i_current, re-init and run all i_current tasks
-#    ======================================================================
-#    | NYY | isAlive?
-#    | -YN | inum_tasks[i_next] == 0
-#    ======================================================================
-#    | XX  | return from: run_all   # no more tasks scheduled, all done!
-#    |   X | # swap i_next and i_current
-#    |     | set i_next to: i_current
-#    |     | set i_current to: (1 - i_next)
-#    |     | # start over on the new task list
-#    |     | set i_task to: 0
-#    |     | set inum_tasks[i_next] to: 0
-#    |     | goto run_task  # skip i_task increment
-#    ======================================================================
-#
-#
-#  label run_next_task
-#    i_task += 1
-#    goto run_task
-#
-#
-#  label run_task
-#    ======================================================================
-#    | YN | i_task < inum_tasks[i_current]
-#    ======================================================================
-#    | X  | goto tasks[i_task, i_current] # always goes to what_next when
-#                                         # task is done
-#    |  X | goto swap_task_lists
-#    ======================================================================
-#
-#
-#subroutine next
-#    # Returns on next cycle
-#    done
-#    push_task return_label returning_to: what_next
-#
-#
-#subroutine push_task task ?task_list: itask_list
-#    var task is label_t
-#    ======================================================================
-#    | NY | got? task_list:
-#    ======================================================================
-#    | X  | set itask_list to: i_next
-#    |  X | continue
-#    ======================================================================
-#    ======================================================================
-#    | YN | inum_tasks[itask_list] >= 100
-#    ======================================================================
-#    | X  | goto abort "task list overflow"
-#    |  X | set tasks[inum_tasks[itask_list], itask_list] to: task
-#    |    | inum_tasks[itask_list] += 1
-#    |    | return
-#    ======================================================================
-#
-#
-#subroutine schedule subr
-#    # Start a new thread
-#    var subr is subroutine
-#
-#    # This will return from this subroutine to let the main thread continue in
-#    # this cycle
-#    push_task return_label task_list: i_current
-#
-#    # Start the new thread
-#    subr returning_to: what_next
-#
-#
-#subroutine delay secs
-#    # FIX
-#    return
+subroutine run_all name$
+    # Runs all subroutines named name$ within all modules.
+    #
+    # Handles the tasking between the subroutines (by them calling cycle.next
+    # and cycle.schedule).
+    #
+    # Returns when all of the tasking is completed.
+
+    telemetry.report_string key: "run_all" value: name$
+
+    set i_current to: 0     # currently running tasks array (0 or 1)
+    set i_next to: 1        # next tasks array (that new tasks are pushed to)
+    set i_task to: 0        # next task to run in currently running tasks array
+    set inum_tasks[0] to: 0 # num_tasks in tasks array 0
+    set inum_tasks[1] to: 0 # num_tasks in tasks array 1
+
+    set p_config to: {labels.gen_all_subroutines name$}
+
+    # This calls c_config which sets what_next to p_next
+    p_config c_yield: c_yield c_done: c_done c_config: c_config
+    goto p_next   # we're off to the races!
+
+  label c_yield subr
+    var subr is subr_t
+    var mod is module
+    set mod to: {labels.get_subr_module subr}
+    set mod_name$ to: {modules.get_module_name$ mod}
+    telemetry.report_string key: "run_all, module name" value: mod_name$
+    set subr_name$ to: {labels.get_subr_name$ subr}
+    telemetry.report_string key: "run_all, subr name" value: subr_name$
+
+    telemetry.report_string key: "run_all" value: "calling next subr"
+    subr returning_to: what_next
+
+  label c_done
+    telemetry.report_string key: "irun" value: "c_done called"
+    set what_next to: run_next_task 
+    goto run_task
+
+  subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
+    # This only gets called while the producer is still active, so always
+    # update what_next.
+    var p_next is p_next_t
+    var p_done is p_done_t
+    =================================================================
+    | YN | got? p_next:
+    =================================================================
+    | X  | set what_next to: p_next 
+    |  X | return
+    =================================================================
+
+
+  label run_next_task
+    i_task += 1
+    goto run_task
+
+
+  label run_task
+    ======================================================================
+    | YN | i_task < inum_tasks[i_current]
+    ======================================================================
+    | X  | goto tasks[i_task, i_current] # always goes to what_next when
+                                         # task is done
+    |  X | goto swap_task_lists
+    ======================================================================
+
+
+  label swap_task_lists
+    # swap i_next into i_current, re-init and run all i_current tasks
+    ======================================================================
+    | NYY | isActive?
+    | -YN | inum_tasks[i_next] == 0
+    ======================================================================
+    | XX  | return from: run_all   # no more tasks scheduled, all done!
+    |   X | # swap i_next and i_current
+    |     | set i_next to: i_current
+    |     | set i_current to: (1 - i_next)
+    |     | # start over on the new task list
+    |     | set i_task to: 0               # for the current task list
+    |     | set inum_tasks[i_next] to: 0   # number of tasks in next task list
+    |     | goto run_task  # skip i_task increment
+    ======================================================================
+
+
+subroutine next
+    # Returns on next cycle
+    done
+    push_task return_label returning_to: what_next
+
+
+subroutine push_task task ?task_list: itask_list
+    var task is label_t
+    ======================================================================
+    | NY | got? task_list:
+    ======================================================================
+    | X  | set itask_list to: i_next
+    |  X | continue
+    ======================================================================
+    ======================================================================
+    | YN | inum_tasks[itask_list] >= 100
+    ======================================================================
+    | X  | goto abort "task list overflow"
+    |  X | set tasks[inum_tasks[itask_list], itask_list] to: task
+    |    | inum_tasks[itask_list] += 1
+    |    | return
+    ======================================================================
+
+
+subroutine schedule subr
+    # Start a new thread
+
+    # This will return from this subroutine to let the main thread continue in
+    # this cycle
+    push_task return_label task_list: i_current
+
+    # Because the return_label has been captured and will be called later,
+    # it is now safe to call schedule again.
+    done
+
+    # Start the new thread
+    subr returning_to: what_next
+
+
+subroutine delay secs
+    # FIX
+    return

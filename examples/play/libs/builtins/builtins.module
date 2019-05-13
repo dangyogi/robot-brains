@@ -26,6 +26,8 @@ type c_done_t is label
 
 subroutine init
     telemetry.report_string key: "builtins.init" value: "called"
+    set isStarted? to: true?
+    set isActive? to: true?
     return
 
 
