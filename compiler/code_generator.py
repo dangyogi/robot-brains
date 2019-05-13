@@ -33,7 +33,8 @@ def todo_with_args(cls, hook_name, list):
 
 
 def run_todo_lists():
-    for list in Target_language.Todo_lists:
+    for list_name, list in Target_language.Todo_lists:
+        print("Running", list_name)
         for fn in list:
             fn()
 

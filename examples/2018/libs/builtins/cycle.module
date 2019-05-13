@@ -17,7 +17,10 @@ dim inum_tasks[2]
 function irun
     # Returns exit_status to return from main.
 
+    telemetry.report_string key: "irun" value: "called"
+
     run_all "init"
+    telemetry.report_string key: "irun" value: "init done"
     goto wait_for_start
 
   label wait_for_start
@@ -39,6 +42,8 @@ function irun
 subroutine run_all name$
     var next_subr is subr_t
     var p_config is p_config_s_t
+
+    telemetry.report_string key: "run_all" value: name$
 
     set i_current to: 0
     set i_next to: 1
@@ -64,10 +69,12 @@ subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
 
 
   label c_yield next_subr
+    telemetry.report_string key: "c_yield" value: "calling next_subr"
     next_subr returning_to: what_next
 
 
   label c_done
+    telemetry.report_string key: "c_done" value: "called"
     set what_next to: run_next_task 
     goto run_task
 

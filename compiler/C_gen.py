@@ -53,8 +53,7 @@ def write_module_instance_list():
           sep='', file=C_file)
     print("struct module_descriptor_s *__module_instances__[] = {", file=C_file)
     for line in Module_instances:
-        print("    (struct module_descriptor_s *)&", line, ",",
-              sep='', file=C_file)
+        print("    &", line, ",", sep='', file=C_file)
     print("};", file=C_file)
 
 
@@ -68,8 +67,8 @@ def start_main():
 
 
 @todo(Gen_step_code)
-def create_cycle_run_code():
-    global Cycle_run_code
+def create_cycle_irun_code():
+    global Cycle_irun_code
 
     cycle = symtable.lookup(Token.dummy('cycle'), Opmode, error_not_found=False)
     if cycle is None or not isinstance(cycle.get_step(), symtable.Module):
@@ -105,7 +104,7 @@ def create_cycle_run_code():
         print("'cycle.terminate' must only take an INTEGER parameter",
               file=sys.stderr)
         sys.exit(1)
-    Cycle_run_code = (
+    Cycle_irun_code = (
         "    if (setjmp(longjmp_to_main)) {",
         "        longjmp_to_main_set = 1;",
         f"        {terminate.C_label_descriptor_name}.params_passed = 0;",
@@ -123,10 +122,10 @@ def create_cycle_run_code():
     )
 
 
-def call_cycle_run():
+def call_cycle_irun():
     print(file=C_file)
-    print("    // call cycle.run", file=C_file)
-    for line in Cycle_run_code:
+    print("    // call cycle.irun", file=C_file)
+    for line in Cycle_irun_code:
         print(line, file=C_file)
     print(file=C_file)
 
@@ -184,7 +183,7 @@ def write_module_instance_declaration(module):
 
 @symtable.Opmode.as_post_hook("link_uses")
 def add_module_instance(m):
-    Module_instances.append(m.C_global_name)
+    Module_instances.append(m.C_descriptor_name)
 
 
 @todo_with_args(symtable.Opmode, "prepare_module", Module_descriptors)
@@ -219,7 +218,7 @@ def set_module_descriptor_pointer(m):
 @todo_with_args(symtable.Module, "prepare_module", Init_labels)
 def init_module_label(module):
     print(f"    {module.C_label_descriptor_name}.module = "
-            f"(struct module_descriptor_s *)&{module.C_global_name};",
+            f"&{module.C_descriptor_name};",
           file=C_file)
 
 
@@ -247,25 +246,27 @@ symtable.Label.write_code = write_label_code
 
 
 def write_statement_code(self, module, extra_indent=0):
-    print(' ' * extra_indent,
-          f"    {self.containing_label.C_label_descriptor_name}.lineno"
+    indent = extra_indent + 4
+    print(' ' * indent,
+          f"{self.containing_label.C_label_descriptor_name}.lineno"
             f" = {self.lineno};",
           sep='', file=C_file)
-    self.write_check_running(extra_indent)
     check_all_vars_used(self.containing_label, self.vars_used, extra_indent)
     write_prep_statements(self.prep_statements, extra_indent)
+    self.write_check_running(extra_indent)
 
     self.write_code_details(module, extra_indent)
 
     for line in self.post_statements:
-        print(' ' * extra_indent, "    ", line, sep='', file=C_file)
+        print(' ' * indent, line, sep='', file=C_file)
 symtable.Statement.write_code = write_statement_code
 
 
 def write_prep_statements(prep_statements, extra_indent):
+    indent = extra_indent + 4
     for line in prep_statements:
         if isinstance(line, str):
-            print(' ' * extra_indent, "    ", line, sep='', file=C_file)
+            print(' ' * indent, line, sep='', file=C_file)
         else:
             line(extra_indent)
 
@@ -285,21 +286,22 @@ def check_all_vars_used(containing_label, vars_used, extra_indent):
 
 
 def check_vars_used(label, vars_module, vars_used, extra_indent):
+    indent = extra_indent + 4
     vars_used = tuple(vars_used)
     mask = sum(1 << v.set_bit for v in vars_used)
     bits_set = f"{vars_module.C_descriptor_name}.vars_set & {hex(mask)}"
-    print(' ' * extra_indent, f"    if ({bits_set} != {hex(mask)}) {{",
+    print(' ' * indent, f"if ({bits_set} != {hex(mask)}) {{",
           sep='', file=C_file)
-    print(' ' * extra_indent,
-          f"        report_var_not_set(&{label.C_label_descriptor_name},",
+    print(' ' * indent,
+          f"    report_var_not_set(&{label.C_label_descriptor_name},",
           sep='', file=C_file)
-    print(' ' * extra_indent,
-          f"                           {bits_set}, {hex(mask)},",
+    print(' ' * indent,
+          f"                       {bits_set}, {hex(mask)},",
           sep='', file=C_file)
     var_names = ', '.join(f'"{v.name.value}"' for v in vars_used)
-    print(' ' * extra_indent, f"                           {var_names});",
+    print(' ' * indent, f"                       {var_names});",
           sep='', file=C_file)
-    print(' ' * extra_indent, "    }", sep='', file=C_file)
+    print(' ' * indent, "}", sep='', file=C_file)
 
 
 def write_continue_details(self, module, extra_indent):
@@ -308,31 +310,34 @@ symtable.Continue.write_code_details = write_continue_details
 
 
 def write_set_details(self, module, extra_indent):
-    print(' ' * extra_indent,
-          f"    {self.lvalue.code} = {self.primary.code};",
+    indent = extra_indent + 4
+    print(' ' * indent,
+          f"{self.lvalue.code} = {self.primary.code};",
           sep='', file=C_file)
     var_set = self.lvalue.var_set
     if var_set is not None:
         module_desc = f"{var_set.parent_namespace.C_descriptor_name}"
-        print(' ' * extra_indent,
-              f"    {module_desc}.vars_set |= {hex(1 << var_set.set_bit)};",
+        print(' ' * indent,
+              f"{module_desc}.vars_set |= {hex(1 << var_set.set_bit)};",
               sep='', file=C_file)
 symtable.Set.write_code_details = write_set_details
 
 
 def write_native_details(self, module, extra_indent):
-    print(' ' * extra_indent, self.code, sep='', file=C_file)
+    indent = extra_indent + 4
+    print(' ' * indent, self.code, sep='', file=C_file)
 symtable.Native_statement.write_code_details = write_native_details
 
 
-def write_args(dest_label, label_type, pos_args, kw_args, extra_indent=4):
+def write_args(dest_label, label_type, pos_args, kw_args, extra_indent=0):
+    indent = extra_indent + 4
     def write_pb(req_types, opt_types, args, pb_name=None):
         if pb_name is None:
             keyword = 'NULL'
         else:
             keyword = f'"{pb_name}"'
         for i, (type, arg) in enumerate(zip(chain(req_types, opt_types), args)):
-            print(' ' * extra_indent,
+            print(' ' * indent,
                   f'*({translate_type(type)} *)'
                   f'param_location({dest_label}, {keyword}, {i}) = '
                   f'{arg.get_step().code};',
@@ -344,67 +349,67 @@ def write_args(dest_label, label_type, pos_args, kw_args, extra_indent=4):
 
 
 def write_goto_details(self, module, extra_indent):
-    extra_indent += 4
+    indent = extra_indent + 4
     primary = self.primary.get_step()
     label = primary.code
-    print(' ' * extra_indent, f'({label})->params_passed = 0;',
-          sep='', file=C_file)
+    print(' ' * indent, f'({label})->params_passed = 0;', sep='', file=C_file)
     write_args(label, primary.type.get_type(),
                self.arguments[0], self.arguments[1], extra_indent)
-    print(' ' * extra_indent, f'goto *({label})->label;',
-          sep='', file=C_file)
+    print(' ' * indent, f'goto *({label})->label;', sep='', file=C_file)
 symtable.Goto.write_code_details = write_goto_details
 
 
 def write_return_details(self, module, extra_indent):
+    indent = extra_indent + 4
     write_done(self.from_opt, self.containing_label, extra_indent)
-    print(' ' * extra_indent,
+    print(' ' * indent,
           f"({self.dest_label})->params_passed = 0;",
           sep='', file=C_file)
     write_args(self.dest_label, self.label_type,
                self.arguments[0], self.arguments[1], extra_indent)
-    print(' ' * extra_indent, f'goto *({self.dest_label})->label;',
+    print(' ' * indent, f'goto *({self.dest_label})->label;',
           sep='', file=C_file)
 symtable.Return.write_code_details = write_return_details
 
 
 def check_call_running(self, extra_indent):
-    extra_indent += 4
+    indent = extra_indent + 4
     label = self.primary.get_step().code
-    print(' ' * extra_indent,
+    print(' ' * indent,
           f"if (({label})->params_passed & FLAG_RUNNING) {{",
           sep='', file=C_file)
-    print(' ' * (extra_indent + 4),
+    print(' ' * (indent + 4),
           f"report_error(&{self.containing_label.C_label_descriptor_name},",
           sep='', file=C_file)
-    print(' ' * (extra_indent + 4),
-          f'             "\'%s\' still running", ({label})->name);',
+    print(' ' * (indent + 4),
+          f'             "\'%s\' still running\\n", ({label})->name);',
           sep='', file=C_file)
-    print(' ' * extra_indent, "}", sep='', file=C_file)
-    print(' ' * extra_indent,
+    print(' ' * indent, "}", sep='', file=C_file)
+    print(' ' * indent,
           f"({label})->params_passed = FLAG_RUNNING;",
           sep='', file=C_file)
 symtable.Call_statement.write_check_running = check_call_running
 symtable.Call_fn.write_check_running = check_call_running
 
 def write_call_details(self, module, extra_indent):
+    indent = extra_indent + 4
     primary = self.primary.get_step()
     label = primary.code
     write_args(label, primary.type.get_type(),
                self.arguments[0], self.arguments[1], extra_indent)
-    print(' ' * extra_indent,
+    print(' ' * indent,
           f'({label})->return_label = {self.returning_to.code};',
           sep='', file=C_file)
-    print(' ' * extra_indent, f'goto *({label})->label;',
+    print(' ' * indent, f'goto *({label})->label;',
           sep='', file=C_file)
 symtable.Call_statement.write_code_details = write_call_details
 
 
 def write_opeq_details(self, module, extra_indent):
+    indent = extra_indent + 4
     _, _, code = compile_binary(self.lvalue, self.operator.split('=')[0],
                                 self.expr)
-    print(' ' * extra_indent, f"    {self.lvalue.code} = {code};",
-          sep='', file=C_file)
+    print(' ' * indent, f"{self.lvalue.code} = {code};", sep='', file=C_file)
 symtable.Opeq_statement.write_code_details = write_opeq_details
 
 
@@ -414,46 +419,48 @@ symtable.Done_statement.write_code_details = write_done_details
 
 
 def write_done(done_label, containing_label, extra_indent):
+    indent = extra_indent + 4
     done_label_code = done_label.get_step().code
     extra_indent += 4
-    print(' ' * extra_indent,
+    print(' ' * indent,
           f"if (!(({done_label_code})->params_passed & FLAG_RUNNING)) {{",
           sep='', file=C_file)
-    print(' ' * (extra_indent + 4),
+    print(' ' * (indent + 4),
           f"report_error(&{containing_label.C_label_descriptor_name},",
           sep='', file=C_file)
-    print(' ' * (extra_indent + 4),
-          '            "\'%s\' not running -- second return?",',
+    print(' ' * (indent + 4),
+          '            "\'%s\' not running -- second return?\\n",',
           sep='', file=C_file)
-    print(' ' * (extra_indent + 4),
+    print(' ' * (indent + 4),
           f'             ({done_label_code})->name);',
           sep='', file=C_file)
-    print(' ' * extra_indent, "}", sep='', file=C_file)
-    print(' ' * extra_indent,
+    print(' ' * indent, "}", sep='', file=C_file)
+    print(' ' * indent,
           f"({done_label_code})->params_passed &= ~FLAG_RUNNING;",
           sep='', file=C_file)
 
 
 def write_dlt_code(self, module, extra_indent=0):
+    indent = extra_indent + 4
     label = self.conditions.containing_label
-    print(' ' * extra_indent, f"    {label.C_label_descriptor_name}.lineno"
+    print(' ' * indent, f"{label.C_label_descriptor_name}.lineno"
             f" = {self.conditions.lineno};",
           sep='', file=C_file)
     check_all_vars_used(label, self.conditions.vars_used, extra_indent)
     write_prep_statements(self.conditions.prep_statements, extra_indent)
     dlt_mask = f"{module.C_global_name}.{label.C_dlt_mask_name}"
-    print(' ' * extra_indent, f"    {dlt_mask} = 0;", sep='', file=C_file)
+    print(' ' * indent, f"{dlt_mask} = 0;", sep='', file=C_file)
     for i, expr in enumerate(reversed(self.conditions.exprs)):
-        print(' ' * extra_indent, f"    if ({expr.code}) {{",
+        print(' ' * indent, f"if ({expr.code}) {{",
               sep='', file=C_file)
-        print(' ' * extra_indent, f"        {dlt_mask} |= {hex(1 << i)};",
+        print(' ' * indent, f"    {dlt_mask} |= {hex(1 << i)};",
               sep='', file=C_file)
-        print(' ' * extra_indent, "    }", sep='', file=C_file)
-    print(' ' * extra_indent, f"    switch ({dlt_mask}) {{",
+        print(' ' * indent, "}", sep='', file=C_file)
+    print(' ' * indent, f"switch ({dlt_mask}) {{",
           sep='', file=C_file)
     for action in self.actions.actions:
         action.write_code(module, extra_indent + 4)
-    print(' ' * extra_indent, "    }", sep='', file=C_file)
+    print(' ' * indent, "}", sep='', file=C_file)
 symtable.DLT.write_code = write_dlt_code
 
 
@@ -541,7 +548,7 @@ def write_label_descriptor(label, module):
 @todo_with_args(symtable.Label, "prepare", Init_labels)
 def init_label(label, module):
     print(f"    {label.C_label_descriptor_name}.module = "
-            f"(struct module_descriptor_s *)&{module.C_global_name};",
+            f"&{module.C_descriptor_name};",
           file=C_file)
     print(
       f"    {label.C_label_descriptor_name}.label = &&{label.C_global_name};",
@@ -612,17 +619,17 @@ def compile_call_fn(self, module, last_label, last_fn_subr):
 
 
 def write_call_fn_call(self, extra_indent):
+    indent = extra_indent + 4
     self.write_check_running(extra_indent)
     primary = self.primary.get_step()
     label = primary.code
     write_args(label, primary.type.get_type(),
                self.pos_arguments, self.kw_arguments, extra_indent)
-    print(' ' * extra_indent,
-          f'    ({label})->return_label = {self.ret_label.code};',
+    print(' ' * indent, f'({label})->return_label = {self.ret_label.code};',
           sep='', file=C_file)
-    print(' ' * extra_indent, f'    goto *({label})->label;',
+    print(' ' * indent, f'goto *({label})->label;',
           sep='', file=C_file)
-    print(' ' * extra_indent, f'  {self.ret_label.decl_code}',
+    print(' ' * (indent - 2), f'{self.ret_label.decl_code}',
           sep='', file=C_file)
 symtable.Call_fn.write_call = write_call_fn_call
 
@@ -666,20 +673,21 @@ def compile_return_label(self, module, last_label, last_fn_subr):
 
 
 Todo_lists = (
-    Assign_names,
-    Gen_step_code,
-    [start_output],
-    Module_instance_definitions,
-    Module_instance_declarations,
-    Label_descriptors,
-    Module_descriptors,
-    [write_module_instance_list, start_main],
-    Init_labels,
-    Set_module_descriptor_pointers,
-    Initialize_module_parameters,
-    [call_cycle_run],
-    Module_code,
-    [end_main, done],
+    ("Assign_names", Assign_names),
+    ("Gen_step_code", Gen_step_code),
+    ("start_output", [start_output]),
+    ("Module_instance_definitions", Module_instance_definitions),
+    ("Module_instance_declarations", Module_instance_declarations),
+    ("Label_descriptors", Label_descriptors),
+    ("Module_descriptors", Module_descriptors),
+    ("write_module_instance_list/start_main",
+     [write_module_instance_list, start_main]),
+    ("Init_labels", Init_labels),
+    ("Set_module_descriptor_pointers", Set_module_descriptor_pointers),
+    ("Initialize_module_parameters", Initialize_module_parameters),
+    ("call_cycle_irun", [call_cycle_irun]),
+    ("Module_code", Module_code),
+    ("end_main/done", [end_main, done]),
 )
 
 

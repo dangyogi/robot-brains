@@ -29,6 +29,7 @@ var isStarted? is boolean
 
 # FIX: temporary
 subroutine init
+    telemetry.report_string key: "builtins.init" value: "called"
     set isAlive? to: false?
     set isActive? to: true?
     set isStarted? to: true?
@@ -41,6 +42,7 @@ label abort message$
 
 
 function get_subroutines_by_name name$ returning p_config_s_t
+  telemetry.report_string key: "get_subroutines_by_name" value: name$
   goto return_label p_config
 
   subroutine p_config ?c_yield: c_yield ?c_done: c_done ?c_config: c_config
@@ -48,12 +50,14 @@ function get_subroutines_by_name name$ returning p_config_s_t
     var c_done is label_t
     var c_config is c_config_t
     # FIX: how to make this optional?
+    telemetry.report_string key: "p_config" value: "calling c_config"
     c_config p_next: next_routine p_done: p_done
     set imodule_index to: 0
     set ilabel_index to: 0
     return
 
   label next_module
+    telemetry.report_integer key: "next_module" value: imodule_index
     ======================================================================
     | YN | imodule_index < {iget_num_modules}
     ======================================================================
@@ -64,15 +68,18 @@ function get_subroutines_by_name name$ returning p_config_s_t
     ======================================================================
 
   subroutine p_done
+    telemetry.report_string key: "p_done" value: "called"
     done with: get_subroutines_by_name
     return
 
   label next_routine
+    telemetry.report_integer key: "next_routine" value: ilabel_index
     ======================================================================
     | YN | ilabel_index < {iget_num_labels imodule_index}
     ======================================================================
     | X  | continue
-    |  X | goto next_module
+    |  X | imodule_index += 1
+    |    | goto next_module
     ======================================================================
 
     ======================================================================
@@ -80,6 +87,7 @@ function get_subroutines_by_name name$ returning p_config_s_t
     ======================================================================
     | X  | set i to: ilabel_index
     |    | ilabel_index += 1
+    |    | telemetry.report_string key: "next_routine" value: "calling c_yield"
     |    | goto c_yield {get_subr imodule_index i}
     |  X | ilabel_index += 1
     |    | goto next_routine
@@ -87,20 +95,31 @@ function get_subroutines_by_name name$ returning p_config_s_t
 
 
 function iget_num_modules
-    return (`__num_modules__`)
+    set i to: (`__num_modules__`)
+    telemetry.report_integer key: "iget_num_modules ->" value: i
+    return i
 
 
 function iget_num_labels imodule
     # FIX: Verify range of imodule?
-    return (`__module_instances__[` imodule `]->num_labels`)
+    telemetry.report_integer key: "iget_num_labels called with" value: imodule
+    set i to: (`__module_instances__[` imodule `]->num_labels`)
+    telemetry.report_integer key: "iget_num_labels ->" value: i
+    return i
 
 
 function get_label_name$ imodule ilabel
+    telemetry.report_integer key: "get_label_name$, imodule" value: imodule
+    telemetry.report_integer key: "get_label_name$, ilabel" value: ilabel
     # FIX: Verify range of imodule and ilabel?
-    return (`__module_instances__[` imodule `]->labels[` ilabel `]->name`)
+    set i$ to: (`__module_instances__[` imodule `]->labels[` ilabel `]->name`)
+    telemetry.report_string key: "get_label_name$ ->" value: i$
+    return i$
 
 
 function get_subr imodule ilabel returning subr_t
+    telemetry.report_integer key: "get_subr, imodule" value: imodule
+    telemetry.report_integer key: "get_subr, ilabel" value: ilabel
     # FIX: Verify range of imodule and ilabel?
     # FIX: Should verify that the returned label is a subr_t...
     return (`__module_instances__[` imodule `]->labels[` ilabel `]`)

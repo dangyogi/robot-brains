@@ -286,8 +286,6 @@ class Use(Entity):
                                   self.pos_arguments, self.kw_arguments)
         pass_args(self.module, self.pos_arguments, self.kw_arguments,
                   Use_param_compiler())
-
-        self.module.prepare_module_steps()
         self.run_post_hooks("prepare_used_module", module)
         #print("Use.prepare_used_module", module, self.module_name, "done")
 
@@ -438,16 +436,16 @@ class Builtin_type(Type):
 
 
 class Typename_type(Type):
-    def __init__(self, ident):
-        self.ident = ident
+    def __init__(self, path):
+        self.path = path
         self.lexpos, self.lineno, self.filename = \
-          ident.lexpos, ident.lineno, ident.filename
+          self.path[-1].lexpos, self.path[-1].lineno, self.path[-1].filename
 
     def __repr__(self):
-        return f"<Typename {self.ident.value}>"
+        return f"<Typename {self}>"
 
     def __str__(self):
-        return self.ident.value
+        return '.'.join(p.value for p in self.path)
 
     def cmp_params(self):
         return self.typedef.cmp_params()
@@ -458,15 +456,19 @@ class Typename_type(Type):
 
     def do_prepare(self, module):
         super().do_prepare(module)
-
-        # types can not be passed as module parameters, so this will be the
-        # same result for all module instances...
-        self.typedef = lookup(self.ident, module)
+        for p in self.path[:-1]:
+            module = lookup(p, module)
+            if not isinstance(module, Use):
+                scanner.syntax_error("Must be defined as a MODULE, "
+                                       f"not a {module.__class__.__name__}",
+                                     p.lexpos, p.lineno, p.filename)
+            module = module.module
+        self.typedef = lookup(self.path[-1], module)
         if not isinstance(self.typedef, Typedef):
             scanner.syntax_error("Must be defined as a TYPE, "
                                    f"not a {self.typedef.__class__.__name__}",
-                                 self.ident.lexpos, self.ident.lineno,
-                                 self.ident.filename)
+                                 self.path[-1].lexpos, self.path[-1].lineno,
+                                 self.path[-1].filename)
 
     def is_numeric(self):
         return self.typedef.type.is_numeric()
@@ -798,7 +800,8 @@ class Namespace(Symtable):
         if lname in self.names:
             return self.names[lname]
         if error_not_found:
-            scanner.syntax_error("Undefined name", ident.lexpos, ident.lineno)
+            scanner.syntax_error("Undefined name", ident.lexpos, ident.lineno,
+                                 ident.filename)
         return None
 
     def set(self, ident, entity):
@@ -886,6 +889,7 @@ class Opmode(Namespace):
         builtins.prepare_module()
         builtins.prepare_module_steps()
         self.prepare_module()
+        self.prepare_module_steps()
         print("setup: done")
 
     def link_uses(self):
@@ -897,6 +901,8 @@ class Opmode(Namespace):
         self.run_post_hooks("link_uses")
 
     def prepare_module(self):
+        r'''Called on each module instance.
+        '''
         #print(self.name, self.__class__.__name__, "prepare_module")
         self.run_pre_hooks("prepare_module")
         self.do_prepare_module()
@@ -911,6 +917,10 @@ class Opmode(Namespace):
             use.prepare_used_module(self)
         print(self.name, self.__class__.__name__,
               "number of var-set bits used", self.next_set_bit)
+
+    def prepare_module_steps(self):
+        for use in self.filter(Use):
+            use.module.prepare_module_steps()
 
 
 class With_parameters(Symtable):
@@ -1034,6 +1044,7 @@ class Module(With_parameters, Opmode):
         self.params_type.prepare(self)
 
     def prepare_module_steps(self):
+        print(self, "prepare_module_steps")
         last_label = None
         last_fn_subr = None
         for step, next_step in pairwise(self.steps):
@@ -1055,6 +1066,7 @@ class Module(With_parameters, Opmode):
                     scanner.syntax_error("Statement must fall-through",
                                          step.lexpos, step.lineno,
                                          step.filename)
+        super().prepare_module_steps()
 
 
 class Step(Symtable):
@@ -1286,6 +1298,8 @@ class Statement_with_arguments(Statement):
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         self.do_pre_arg_check_prepare(module, last_label, last_fn_subr)
+        #print("label_type", repr(self.label_type), self.arguments[0],
+        #      self.arguments[1])
         self.label_type.satisfied_by_arguments(self.error_reporter,
                                                self.arguments[0],
                                                self.arguments[1])
@@ -2159,8 +2173,9 @@ class Binary_expr(Expr):
                 scanner.syntax_error(
                   f"Expected {arg_type} type, got {self.expr2.get_step().type}",
                   self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
-            if self.expr1.is_numeric() and not self.expr2.is_numeric() or \
-               self.expr1.is_string() and not self.expr2.is_string():
+            if not self.expr1.type.get_type().any_type and \
+               (self.expr1.is_numeric() and not self.expr2.is_numeric() or \
+                self.expr1.is_string() and not self.expr2.is_string()):
                 scanner.syntax_error(
                   f"{self.operator!r}: expression types don't match",
                   self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
@@ -2211,6 +2226,11 @@ class Return_label(Expr):
                                      self.label.lexpos, self.label.lineno,
                                      self.label.filename)
         self.type = self.label.type.return_label_type
+        #print("Return_label: label", self.label.name.value)
+        #print("Return_label: label_type", self.type.label_type)
+        #print("Return_label: required_params", self.type.required_params)
+        #print("Return_label: optional_params", self.type.optional_params)
+        #print("Return_label: kw_params", self.type.kw_params)
 
 
 class Native_expr(Native, Expr):

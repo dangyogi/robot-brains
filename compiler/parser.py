@@ -46,6 +46,7 @@ def p_empty_tuple(p):
     steps :
     statements :
     action_statements :
+    dotted_prefix :
     '''
     p[0] = ()
 
@@ -138,6 +139,7 @@ def p_append(p):
     action_statements : action_statements simple_statement newlines
     action_statements : action_statements continue newlines
     native_elements : native_elements native_element
+    dotted_prefix : dotted_prefix IDENT '.'
     '''
     p[0] = p[1] + (p[2],)
 
@@ -216,13 +218,14 @@ def p_builtin_type(p):
                 | BOOLEAN
                 | STRING
                 | MODULE
+                | TYPE
     """
     p[0] = Builtin_type(p[1].lower())
 
 
 def p_typename(p):
-    "simple_type : IDENT"
-    p[0] = Typename_type(p[1])
+    "simple_type : dotted_prefix IDENT"
+    p[0] = Typename_type(p[1] + (p[2],))
 
 
 def p_dimension(p):
@@ -770,6 +773,7 @@ if __name__ == "__main__":
     try:
         generate(opmode)
     except SyntaxError:
+        #raise
         sys.exit(1)
 
 

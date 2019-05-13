@@ -113,6 +113,7 @@ my_handler(int signum) {
 
 void
 report_error(struct label_descriptor_s *containing_label, char *format, ...) {
+    // Does not add a \n
     va_list args;
 
     va_start(args, format);

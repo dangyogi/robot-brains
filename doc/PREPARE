@@ -6,6 +6,7 @@
     2. runs prepare_module() on builtins
     3. runs prepare_module_steps() on builtins
     4. runs prepare_module() on itself
+    5. runs prepare_module_steps() on itself
 
 
 - Opmode.link_uses()    <hooked>
@@ -24,6 +25,7 @@
 
 
 - Opmode.prepare_module():  <hooked>
+  called on each module instance
 
   - self.prepare_entities()  <hooked>
     - calls prepare(self) on each named Entity in the Namespace
@@ -36,7 +38,11 @@
       parameters
 
 
-Module.prepare_module_steps():
+Opmode.prepare_module_steps():
+  - call prepare_module_steps on each Use.module
+
+  - Module.prepare_module_steps() also does
+    (before Opmode.prepare_module_steps):
     - call prepare_step(self, last_label, last_fn_subr) on each step
       - call last_label.reset() prior to each call
     - reports syntax error on final statement errors
@@ -92,7 +98,6 @@ Module.prepare_module_steps():
   - call self.module.prepare_module()
   - check module argument types/numbers
   - pass constant module parameters, set all module parameter 'passed' bits
-  - call self.module.prepare_module_steps()
 
 
 - Step.prepare_step(module, last_label, last_fn_subr)  <hooked>

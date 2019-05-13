@@ -1,0 +1,35 @@
+# builtins.module
+
+# builtins module is included by all opmodes!
+#
+# All names within this modules are available to all modules!
+
+module
+
+use cycle
+use telemetry
+use modules
+use labels
+
+type subr_t is subroutine
+
+type label_t is label
+type label_l_t is label taking label_t
+type label_s_t is label taking subr_t
+
+type p_next_t is label          # Ends by going to c_yield or c_done.
+type p_done_t is subroutine     # Does NOT goto c_done!
+
+# Does NOT call p_done, producer must finalize before going here.
+type c_done_t is label
+
+
+subroutine init
+    telemetry.report_string key: "builtins.init" value: "called"
+    return
+
+
+label abort message$
+    `fprintf(stderr, "%s\n", ` message$ `);`
+    goto cycle.terminate 1
+

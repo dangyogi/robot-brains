@@ -1,0 +1,34 @@
+# consumer.module
+
+# use iter_types element_type
+# use consumer iter_types c_yield c_done
+#
+# subroutine my_consumer p_config
+#     <init code>
+#     goto consumer.start p_config
+#
+#   label c_yield element
+#     <process element>
+#     goto consumer.p_next
+#     consumer.p_done
+#     goto c_done
+#
+#   label c_done
+#     return
+
+module iter_types c_yield c_done
+
+var c_yield is iter_types.c_yield_t
+var c_done is iter_types.c_done_t
+
+var p_next is iter_types.p_next_t
+var p_done is iter_types.p_done_t
+var p_config is iter_types.p_config_t
+
+
+subroutine c_config ?p_next: p_next ?p_done: p_done ?p_config: p_config
+    return
+
+label start p_config
+    p_config c_yield: c_yield c_done: c_done c_config: c_config
+    goto p_next

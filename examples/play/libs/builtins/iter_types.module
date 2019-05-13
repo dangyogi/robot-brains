@@ -1,0 +1,35 @@
+# iter_types.module
+
+module element_t
+
+
+type p_next_t is label          # Ends going to c_yield or c_done.
+type p_done_t is subroutine     # Does NOT goto c_done!
+
+# Calls c_config, each time it is passed.
+type p_config_t is subroutine taking ?c_yield: c_yield_t ?c_done: c_done_t
+                                  -> ?c_config: c_config_t
+
+
+# Ends up going to p_next or calling p_done.
+type c_yield_t is label taking element_t
+
+# Does NOT call p_done.  Producer must finalize before going here.
+type c_done_t is label 
+
+# Does NOT call p_config.
+type c_config_t is subroutine taking ?p_next: p_next_t ?p_done: p_done_t
+                                  -> ?p_config: p_config_t
+
+
+var element_t is type
+
+
+# Startup:
+#
+# p_config = producer ...
+#
+# consumer p_config
+#   - calls p_config c_yield: c_yield c_done: c_done c_config: c_config
+#     - calls c_config p_next: p_next p_done: p_done p_config: p_config
+#   - goto p_next
