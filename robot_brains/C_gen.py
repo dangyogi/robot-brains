@@ -5,10 +5,11 @@ import os.path
 import operator
 from functools import partial
 from itertools import chain, groupby
+from pkg_resources import resource_stream
 
-import symtable
-from scanner import Token, syntax_error
-from code_generator import (
+from robot_brains import symtable
+from robot_brains.scanner import Token, syntax_error
+from robot_brains.code_generator import (
     todo, todo_with_args, translate_name, translate_type, unary, binary,
     subscript, relative_path, wrap, compile_unary, compile_binary,
 )
@@ -41,10 +42,10 @@ def start_output():
     global C_file
     filename = f"{Opmode.name}.c"
     C_file = open(filename, 'wt')
-    with open("C_preamble") as preamble:
+    with resource_stream(__name__, "C_preamble") as preamble:
         print(f"// {filename}", file=C_file)
         print(file=C_file)
-        C_file.write(preamble.read())
+        C_file.write(preamble.read().decode('ascii'))
 
 
 def write_module_instance_list():

@@ -4,11 +4,11 @@ import operator
 import os.path
 import ply.yacc as yacc
 
-from scanner import (
+from robot_brains.scanner import (
     tokens, syntax_error, lex_file, Token, check_for_errors, set_expanded_kws,
 )
 
-from symtable import (
+from robot_brains.symtable import (
     last_parameter_obj, current_namespace, top_namespace, Module, Opmode,
     Subroutine, Function, Native_statement, Native_expr,
     Use, Typedef, Label, Return_label, DLT, Conditions, DLT_MAP, Actions,
@@ -746,7 +746,7 @@ def _find_module(name, path):
     return None
 
 
-if __name__ == "__main__":
+def compile():
     import sys
 
     print("recursion limit was", sys.getrecursionlimit(), "setting to 100")
@@ -766,8 +766,8 @@ if __name__ == "__main__":
     print()
     print("generate:")
     print()
-    from code_generator import init_code_generator, generate
-    import C_gen
+    from robot_brains.code_generator import init_code_generator, generate
+    from robot_brains import C_gen
     init_code_generator(C_gen, Rootdir)
 
     try:
@@ -777,3 +777,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
 
+if __name__ == "__main__":
+    compile()

@@ -6,8 +6,8 @@ import operator
 from functools import partial
 from io import StringIO
 
-import symtable
-from scanner import Token, syntax_error
+from robot_brains import symtable
+from robot_brains.scanner import Token, syntax_error
 
 
 Num_label_bits = 1              # running bit

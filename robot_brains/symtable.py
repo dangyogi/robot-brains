@@ -5,7 +5,7 @@ from copy import deepcopy
 from math import isclose
 from itertools import tee, zip_longest, chain
 
-import scanner
+from robot_brains import scanner
 
 
 Last_parameter_obj = None
