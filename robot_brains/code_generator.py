@@ -113,7 +113,7 @@ def subscript(left, right):
 def translate_name(name):
     if isinstance(name, Token):
         name = name.value
-    if not name[-1].isdecimal() and not name[-1].isalpha():
+    if name[-1] in Target_language.Illegal_chars:
         return name[:-1].lower() + '_'
     if name.lower() in Target_language.Reserved_words:
         return name.lower() + '_'

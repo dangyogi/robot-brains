@@ -1,0 +1,98 @@
+// Can use a class declared later in the file!
+
+
+class LabelDescriptor {
+    final String name;
+    final String type;
+
+    // use parameter_block_descriptors.length for how many
+    final ParameterBlockDescriptor[] parameterBlockDescriptors;
+
+    final int caseNumber;
+
+    final ModuleDescriptor module;      // filled in later, in main
+
+    // values change at runtime
+    long paramsPassed;
+    long lineno;
+    LabelDescriptor returnLabel;
+
+    LabelDescriptor(String _name, String _type, ParameterBlockDescriptor[] _pbs,
+                    int _caseNumber)
+    {
+        name = _name;
+        type = _type;
+        parameterBlockDescriptors = _pbs;
+        caseNumber = _caseNumber;
+        paramsPassed = 0;
+        lineno = 0;
+        returnLabel = null;
+    }
+}
+
+
+class ParamBlockDescriptor {
+    final String name;          // null for positional param block
+    final int numParams;
+    final int numRequiredParams;
+    final int numOptionalParams;
+    final int[] paramIndexes;   // all params, caller knows what array to
+                                // apply it to
+    final long[] varSetMasks;   // all params
+    final long kwMask;          // 0 if keyword is not optional
+    final long[] paramMasks;    // only optional params
+
+    ParamBlockDescriptor(String _name, int _numParams, int _numRequiredParams,
+                         int _numOptionalParams, int[] _paramIndexes,
+                         long[] _varSetMasks, long _kwMask, long[] _paramMasks)
+    {
+        name = _name;
+        numParams = _numParams;
+        numRequiredParams = _numRequiredParams;
+        numOptionalParams = _numOptionalParams;
+        paramIndexes = _paramIndexes;
+        varSetMasks = _varSetMasks;
+        kwMask = _kwMask;
+        paramMasks = _paramMasks;
+    }
+}
+
+
+class ModuleDescriptor {
+    final String name;
+    final String filename;
+    LabelDescriptor moduleParams;
+    long varsSet;
+    LabelDescriptor[] labels;
+
+    ModuleDescriptor(String _name, String _filename,
+                     LabelDescriptor _moduleParams, LabelDescriptor[] _labels)
+    {
+        name = _name;
+        filename = _filename;
+        moduleParams = _moduleParams;
+        labels = _labels;
+    }
+}
+
+
+public class myname extends LinearOpMode {
+    // globals go here
+    static LabelDescriptor label_x = new LabelDescriptor(...);
+    ...
+    static ModuleDescriptor module_x = new ModuleDescriptor(...);
+    ...
+
+    // there are on individual module instances...
+    static boolean bool_vars[123];
+    static long int_vars[123];
+    static double float_vars[123];
+    static String str_vars[123];
+    static LabelDescriptor label_vars[123];
+    static ModuleDescriptor module_vars[123];
+
+    public void runOpMode() {
+        waitForStart()
+        opModeIsActive()
+    }
+}
