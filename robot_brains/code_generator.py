@@ -121,7 +121,7 @@ def translate_name(name):
 
 
 def translate_type(type):
-    type = type.get_type()
+    type = type.deref()
     if isinstance(type, symtable.Builtin_type):
         return Target_language.Types[type.name.lower()]
     if isinstance(type, symtable.Label_type):

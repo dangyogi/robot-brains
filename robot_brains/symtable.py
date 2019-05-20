@@ -172,11 +172,14 @@ class Variable(Entity):
         self.type.prepare(module)
 
     def set_module(self, module):
+        # FIX: never called...
         self.immediate = True
         assert module.immediate
         self.value = module.value
 
-    def get_step(self):
+    def deref(self):
+        if self.immediate:
+            return self.value.deref()
         return self
 
     def is_numeric(self):
@@ -196,6 +199,9 @@ class Variable(Entity):
 
     def is_module(self):
         return self.type.is_module()
+
+    def is_type(self):
+        return self.type.is_type()
 
 
 class Required_parameter(Symtable):
@@ -293,7 +299,7 @@ class Use(Entity):
     def type(self):
         return self.module.type
 
-    def get_step(self):
+    def deref(self):
         return self.module
 
 
@@ -307,6 +313,7 @@ class Typedef(Entity):
     or MODULE
     '''
 
+    immediate = True
     is_module = False
 
     def __init__(self, ident, type):
@@ -315,6 +322,13 @@ class Typedef(Entity):
 
     def __repr__(self):
         return f"<Typedef {self.name.value} {self.type}>"
+
+    def deref(self):
+        return self.type.deref()
+
+    @property
+    def value(self):
+        return self.type
 
     def cmp_params(self):
         return (self.module.filename, self.name.value.lower())
@@ -338,7 +352,7 @@ class Type(Symtable):
     def __hash__(self):
         return hash((self.__class__, self.cmp_params()))
 
-    def get_type(self):
+    def deref(self):
         return self
 
     def is_numeric(self):
@@ -359,14 +373,17 @@ class Type(Symtable):
     def is_module(self):
         return False
 
+    def is_type(self):
+        return False
+
     def can_take_type(self, reporter, arg_type):
         r'''Check and report any type mismatches.
 
         If there are any mismatches, the syntax error is reported against
         `arg_type` if `report_arg_type` is True, else against self.
         '''
-        my_t = self.get_type()
-        arg_t = arg_type.get_type()
+        my_t = self.deref()
+        arg_t = arg_type.deref()
         if not my_t.any_type and not arg_t.any_type and my_t is not arg_t:
             if type(my_t) != type(arg_t):
                 reporter.report(f"Incompatible types, {my_t} and {arg_t}")
@@ -374,6 +391,7 @@ class Type(Symtable):
 
 
 class Any_type(Type):
+    r'The type of all Native_exprs.'
     any_type = True
 
     def __str__(self):
@@ -396,6 +414,8 @@ class Any_type(Type):
 
     def is_module(self):
         return True
+
+    # leave is_type as False (inherited)
 
 
 class Builtin_type(Type):
@@ -429,6 +449,9 @@ class Builtin_type(Type):
     def is_module(self):
         return self.name == 'module'
 
+    def is_type(self):
+        return self.name == 'type'
+
     def _can_take_type(self, reporter, arg_type):
         if not (self.name == arg_type.name or \
                 self.name == 'float' and arg_type.name == 'integer'):
@@ -450,9 +473,9 @@ class Typename_type(Type):
     def cmp_params(self):
         return self.typedef.cmp_params()
 
-    def get_type(self):
+    def deref(self):
         r'Only valid after prepared.'
-        return self.typedef.type.get_type()
+        return self.typedef.type.deref()
 
     def do_prepare(self, module):
         super().do_prepare(module)
@@ -487,6 +510,9 @@ class Typename_type(Type):
 
     def is_module(self):
         return self.typedef.type.is_module()
+
+    def is_type(self):
+        return self.typedef.type.is_type()
 
 
 class Label_type(Type):
@@ -573,7 +599,7 @@ class Label_type(Type):
 
         Assumes I'm at fault if there are any mismatches.
         '''
-        fn_ret_t = fn_subr_type.get_type().return_label_type.get_type()
+        fn_ret_t = fn_subr_type.deref().return_label_type.deref()
         fn_ret_t.can_take_type(reporter.return_type(), self)
 
     def _can_take_type(self, reporter, arg_type):
@@ -641,7 +667,7 @@ class Label_type(Type):
              in enumerate(zip(chain(sending_req, sending_opt),
                               chain(receiving_req, receiving_opt)),
                           1):
-                receiving_param.get_type().can_take_type(
+                receiving_param.deref().can_take_type(
                                              reporter.param_number(i),
                                              sending_param)
 
@@ -1087,7 +1113,7 @@ class Step(Symtable):
         '''
         pass
 
-    def get_step(self):
+    def deref(self):
         return self
 
 
@@ -1149,7 +1175,7 @@ class Label(With_parameters, Step, Entity):
 
     def get_temp(self, type):
         r'Returns prepared Variable of `type`.'
-        available_vars = self.temps[type.get_type()] - self.temps_taken
+        available_vars = self.temps[type.deref()] - self.temps_taken
         if available_vars:
             ans = available_vars.pop()
         else:
@@ -1158,7 +1184,7 @@ class Label(With_parameters, Step, Entity):
                          f"__{self.name.value}__temp_{self.last_temp_number}",
                          type)
             ans.prepare(self.parent_namespace)
-            self.temps[type.get_type()].add(ans)
+            self.temps[type.deref()].add(ans)
         self.temps_taken.add(ans)
         return ans
 
@@ -1255,7 +1281,7 @@ class Set(Statement):
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
-        self.lvalue.type.get_type().can_take_type(Error_reporter(self.primary),
+        self.lvalue.type.deref().can_take_type(Error_reporter(self.primary),
                                                   self.primary.type)
 
 
@@ -1273,7 +1299,7 @@ class Native:
                 element.prepare_step(module, last_label, last_fn_subr)
                 self.vars_used.update(element.vars_used)
                 prep_statements.extend(element.prep_statements)
-                segments.append(element.get_step().code)
+                segments.append(element.deref().code)
             else:
                 assert isinstance(element, str)
                 segments.append(element)
@@ -1323,7 +1349,7 @@ class Goto(Statement_with_arguments):
 
     def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
         super().do_pre_arg_check_prepare(module, last_label, last_fn_subr)
-        self.label_type = self.primary.type.get_type()
+        self.label_type = self.primary.type.deref()
 
 
 class Return(Statement_with_arguments):
@@ -1347,11 +1373,11 @@ class Return(Statement_with_arguments):
             self.from_opt = last_fn_subr
         if self.to_opt is None:
             self.to_opt = self.from_opt
-            self.dest_label = f"({self.to_opt.get_step().code})->return_label"
-            self.label_type = self.to_opt.get_step().type.return_label_type
+            self.dest_label = f"({self.to_opt.deref().code})->return_label"
+            self.label_type = self.to_opt.deref().type.return_label_type
         else:
-            self.dest_label = self.to_opt.get_step().code
-            self.label_type = self.to_opt.type.get_type()
+            self.dest_label = self.to_opt.deref().code
+            self.label_type = self.to_opt.type.deref()
 
 
 class Call_statement(Statement_with_arguments):
@@ -1373,10 +1399,10 @@ class Call_statement(Statement_with_arguments):
 
     def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
         super().do_pre_arg_check_prepare(module, last_label, last_fn_subr)
-        fn = self.primary.get_step()
+        fn = self.primary.deref()
 
         # This is always verified to be a Label_type
-        fn_type = fn.type.get_type()
+        fn_type = fn.type.deref()
 
         self.label_type = fn_type
 
@@ -1386,7 +1412,7 @@ class Call_statement(Statement_with_arguments):
             self.returning_to = new_label
             self.post_statements = (new_label.decl_code,)
 
-        ret_to_t = self.returning_to.type.get_type()
+        ret_to_t = self.returning_to.type.deref()
         if not isinstance(ret_to_t, Label_type) or \
            ret_to_t.label_type != 'label':
             scanner.syntax_error("Must be a LABEL",
@@ -1744,22 +1770,25 @@ class Expr(Step):
         self.prelude_steps = []
 
     def is_numeric(self):
-        return self.type.is_numeric()
+        return self.type.deref().is_numeric()
 
     def is_integer(self):
-        return self.type.is_integer()
+        return self.type.deref().is_integer()
 
     def is_float(self):
-        return self.type.is_float()
+        return self.type.deref().is_float()
 
     def is_string(self):
-        return self.type.is_string()
+        return self.type.deref().is_string()
 
     def is_boolean(self):
-        return self.type.is_boolean()
+        return self.type.deref().is_boolean()
 
     def is_module(self):
-        return self.type.is_module()
+        return self.type.deref().is_module()
+
+    def is_type(self):
+        return self.type.deref().is_type()
 
 
 class Literal(Expr):
@@ -1783,11 +1812,13 @@ class Literal(Expr):
         return f"<Literal {self.value!r}>"
 
 
-class Reference(Expr):
+class Reference(Expr, Type):
     r'''An IDENT that references either a Variable or Label.
 
     Type IDENTs are converted to Typename_types rather than References.
     '''
+    is_type = False
+
     def __init__(self, ident):
         Expr.__init__(self, ident.lexpos, ident.lineno)
         self.ident = ident
@@ -1796,12 +1827,20 @@ class Reference(Expr):
     def __repr__(self):
         return f"<Reference {self.ident.value}>"
 
+    def __eq__(self, b):
+        assert self.is_type
+        return self.referent.deref() == b
+
+    def __hash__(self):
+        assert self.is_type
+        return hash(self.referent.deref())
+
+    def deref(self):
+        return self.referent.deref()
+
     def set_as_lvalue(self):
         current_namespace().make_variable(self.ident)
         self.as_lvalue = True
-
-    def get_step(self):
-        return self.referent.get_step()
 
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
@@ -1811,19 +1850,25 @@ class Reference(Expr):
         self.referent = lookup(self.ident, module)
         self.type = self.referent.type
         #print("Reference", self.ident, "found", self.referent)
-        if isinstance(self.referent.get_step(), (Variable, Label)):
-            self.prep_statements = self.referent.get_step().prep_statements
+        if isinstance(self.referent.deref(), (Variable, Label)):
+            self.prep_statements = self.referent.deref().prep_statements
             if self.as_lvalue:
-                self.var_set = self.referent.get_step()
+                self.var_set = self.referent.deref()
                 if not isinstance(self.var_set, Variable):
                     scanner.syntax_error("Variable expected",
                                          self.ident.lexpos, self.ident.lineno,
                                          self.ident.filename)
             else:
-                self.vars_used = self.referent.get_step().vars_used
-            self.precedence = self.referent.get_step().precedence
-            self.assoc = self.referent.get_step().assoc
-            self.code = self.referent.get_step().code
+                self.vars_used = self.referent.deref().vars_used
+            self.precedence = self.referent.deref().precedence
+            self.assoc = self.referent.deref().assoc
+            self.code = self.referent.deref().code
+        else:
+            assert isinstance(self.referent.deref(), (Module, Type))
+            if self.as_lvalue:
+                scanner.syntax_error("Variable expected",
+                                     self.ident.lexpos, self.ident.lineno,
+                                     self.ident.filename)
 
 
 class Dot(Expr):
@@ -1847,14 +1892,14 @@ class Dot(Expr):
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         self.expr.prepare_step(module, last_label, last_fn_subr)
-        if not self.expr.get_step().immediate or \
-           not isinstance(self.expr.get_step().value, Module):
+        if not self.expr.deref().immediate or \
+           not isinstance(self.expr.deref().value, Module):
             scanner.syntax_error("Module expected",
                                  self.expr.lexpos, self.expr.lineno,
                                  self.expr.filename)
-        self.referent = self.expr.get_step().value.lookup(self.ident)
+        self.referent = self.expr.deref().value.lookup(self.ident)
         self.type = self.referent.type
-        step = self.referent.get_step()
+        step = self.referent.deref()
         if self.as_lvalue:
             if not isinstance(step, Variable):
                 scanner.syntax_error("Variable expected",
@@ -1870,7 +1915,7 @@ class Dot(Expr):
 
     @property
     def code(self):
-        return self.referent.code
+        return self.referent.deref().code
 
 
 class Subscript(Expr):
@@ -1894,17 +1939,17 @@ class Subscript(Expr):
         prep_statements = []
         self.vars_used = set()
         self.array_expr.prepare_step(module, last_label, last_fn_subr)
-        prep_statements.extend(self.array_expr.get_step().prep_statements)
-        self.vars_used.update(self.array_expr.get_step().vars_used)
-        if not isinstance(self.array_expr.get_step(), Variable):
+        prep_statements.extend(self.array_expr.deref().prep_statements)
+        self.vars_used.update(self.array_expr.deref().vars_used)
+        if not isinstance(self.array_expr.deref(), Variable):
             scanner.syntax_error("Subscripts may only apply to Variables",
                                  self.array_expr.lexpos, self.array_expr.lineno,
                                  self.array_expr.filename)
         for subscript in self.subscript_exprs:
             subscript.prepare_step(module, last_label, last_fn_subr)
-            prep_statements.extend(subscript.get_step().prep_statements)
-            self.vars_used.update(subscript.get_step().vars_used)
-        dims = len(self.array_expr.get_step().dimensions)
+            prep_statements.extend(subscript.deref().prep_statements)
+            self.vars_used.update(subscript.deref().vars_used)
+        dims = len(self.array_expr.deref().dimensions)
         if dims < len(self.subscript_exprs):
             scanner.syntax_error("Too many subscripts",
                                  self.subscript_exprs[dims].lexpos,
@@ -2022,7 +2067,7 @@ class Call_fn(Expr):
         self.primary.prepare_step(module, last_label, last_fn_subr)
         prep_statements = list(self.primary.prep_statements).copy()
         self.vars_used = set(self.primary.vars_used).copy()
-        fn_type = self.primary.type.get_type()
+        fn_type = self.primary.type.deref()
         if not isinstance(fn_type, Label_type) or \
            fn_type.label_type != 'function' or \
            len(fn_type.return_types[0][0]) != 1 or \
@@ -2067,31 +2112,31 @@ class Unary_expr(Expr):
                                      self.expr.lexpos, self.expr.lineno,
                                      self.expr.filename)
             self.type = self.expr.type
-            if self.expr.get_step().immediate:
+            if self.expr.deref().immediate:
                 self.immediate = True
                 if self.operator == '-':
-                    self.value = -self.expr.get_step().value
+                    self.value = -self.expr.deref().value
                 else:
-                    self.value = abs(self.expr.get_step().value)
+                    self.value = abs(self.expr.deref().value)
         elif self.operator == 'not':
             if not self.expr.is_boolean():
                 scanner.syntax_error("Must be boolean",
                                      self.expr.lexpos, self.expr.lineno,
                                      self.expr.filename)
             self.type = Builtin_type("boolean")
-            if self.expr.get_step().immediate:
+            if self.expr.deref().immediate:
                 self.immediate = True
-                self.value = not self.expr.get_step().value
+                self.value = not self.expr.deref().value
         else:
             raise AssertionError(f"Unknown operator {self.operator}")
 
     @property
     def prep_statements(self):
-        return self.expr.get_step().prep_statements
+        return self.expr.deref().prep_statements
 
     @property
     def vars_used(self):
-        return self.expr.get_step().vars_used
+        return self.expr.deref().vars_used
 
 
 class Binary_expr(Expr):
@@ -2136,45 +2181,45 @@ class Binary_expr(Expr):
         if arg_type == 'integer':
             if not self.expr1.is_integer():
                 scanner.syntax_error(
-                  f"Expected INTEGER type, got {self.expr1.get_step().type}",
+                  f"Expected INTEGER type, got {self.expr1.deref().type}",
                   self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
             if not self.expr2.is_integer():
                 scanner.syntax_error(
-                  f"Expected INTEGER type, got {self.expr2.get_step().type}",
+                  f"Expected INTEGER type, got {self.expr2.deref().type}",
                   self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
         elif arg_type == 'float':    # at least one has to be float
             if not self.expr1.is_numeric():
                 scanner.syntax_error(
-                  f"Expected number type, got {self.expr1.get_step().type}",
+                  f"Expected number type, got {self.expr1.deref().type}",
                   self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
             if not self.expr2.is_numeric():
                 scanner.syntax_error(
-                  f"Expected number type, got {self.expr2.get_step().type}",
+                  f"Expected number type, got {self.expr2.deref().type}",
                   self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
             if not self.expr1.is_float() and not self.expr2.is_float():
                 scanner.syntax_error(
-                  f"Expected FLOAT type, got {self.expr1.get_step().type}",
+                  f"Expected FLOAT type, got {self.expr1.deref().type}",
                                      self.expr1.lexpos, self.expr1.lineno,
                                      self.expr1.filename)
         elif arg_type == 'number':
             if not self.expr1.is_numeric():
                 scanner.syntax_error(
-                  f"Expected number type, got {self.expr1.get_step().type}",
+                  f"Expected number type, got {self.expr1.deref().type}",
                   self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
             if not self.expr2.is_numeric():
                 scanner.syntax_error(
-                  f"Expected number type, got {self.expr2.get_step().type}",
+                  f"Expected number type, got {self.expr2.deref().type}",
                   self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
         elif arg_type == 'number or string':
             if not self.expr1.is_numeric() and not self.expr1.is_string():
                 scanner.syntax_error(
-                  f"Expected {arg_type} type, got {self.expr1.get_step().type}",
+                  f"Expected {arg_type} type, got {self.expr1.deref().type}",
                   self.expr1.lexpos, self.expr1.lineno, self.expr1.filename)
             if not self.expr2.is_numeric() and not self.expr2.is_string():
                 scanner.syntax_error(
-                  f"Expected {arg_type} type, got {self.expr2.get_step().type}",
+                  f"Expected {arg_type} type, got {self.expr2.deref().type}",
                   self.expr2.lexpos, self.expr2.lineno, self.expr2.filename)
-            if not self.expr1.type.get_type().any_type and \
+            if not self.expr1.type.deref().any_type and \
                (self.expr1.is_numeric() and not self.expr2.is_numeric() or \
                 self.expr1.is_string() and not self.expr2.is_string()):
                 scanner.syntax_error(
@@ -2191,20 +2236,20 @@ class Binary_expr(Expr):
                            else 'float')
         else:
             self.type = Builtin_type(result_type)
-        if self.expr1.get_step().immediate and self.expr2.get_step().immediate:
+        if self.expr1.deref().immediate and self.expr2.deref().immediate:
             self.immediate = True
-            self.value = immed_fn(self.expr1.get_step().value,
-                                  self.expr2.get_step().value)
+            self.value = immed_fn(self.expr1.deref().value,
+                                  self.expr2.deref().value)
 
     @property
     def prep_statements(self):
-        return self.expr1.get_step().prep_statements \
-             + self.expr2.get_step().prep_statements
+        return self.expr1.deref().prep_statements \
+             + self.expr2.deref().prep_statements
 
     @property
     def vars_used(self):
-        return self.expr1.get_step().vars_used.union(
-                 self.expr2.get_step().vars_used)
+        return self.expr1.deref().vars_used.union(
+                 self.expr2.deref().vars_used)
 
 
 class Return_label(Expr):
@@ -2312,9 +2357,10 @@ class Use_param_compiler:
         param.passed = passed
 
     def pair_param(self, param_block, param, expr):
-        if expr.get_step().immediate:
+        type = param.variable.type.deref()
+        if expr.deref().immediate:
             param.variable.immediate = True
-            param.variable.value = expr.get_step().value
+            param.variable.value = expr.deref().value
             # We can skip setting the bit in module.vars_set since there is no
             # way to test those bits in the code...
 

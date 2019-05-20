@@ -69,16 +69,16 @@ def create_cycle_irun_code():
     global Cycle_irun_code
 
     cycle = symtable.lookup(Token.dummy('cycle'), Opmode, error_not_found=False)
-    if cycle is None or not isinstance(cycle.get_step(), symtable.Module):
+    if cycle is None or not isinstance(cycle.deref(), symtable.Module):
         print("Could not find 'cycle' module", file=sys.stderr)
         sys.exit(1)
-    cycle = cycle.get_step()
+    cycle = cycle.deref()
     run = cycle.lookup(Token.dummy('irun'), error_not_found=False)
-    if run is None or not isinstance(run.get_step(), symtable.Function):
+    if run is None or not isinstance(run.deref(), symtable.Function):
         print("Could not find 'irun' function in 'cycle' module",
               file=sys.stderr)
         sys.exit(1)
-    run = run.get_step()
+    run = run.deref()
     if run.pos_param_block is not None or run.kw_parameters:
         print("'cycle.irun' must not take any parameters", file=sys.stderr)
         sys.exit(1)
@@ -89,11 +89,11 @@ def create_cycle_irun_code():
     var = run.create_variable('__exit_status__', integer)
     done_label = run.new_fn_ret_label(run.parent_namespace, var)
     terminate = cycle.lookup(Token.dummy('terminate'), error_not_found=False)
-    if terminate is None or type(terminate.get_step()) is not symtable.Label:
+    if terminate is None or type(terminate.deref()) is not symtable.Label:
         print("Could not find 'terminate' label in 'cycle' module",
               file=sys.stderr)
         sys.exit(1)
-    terminate = terminate.get_step()
+    terminate = terminate.deref()
     if terminate.pos_param_block is None or \
        len(terminate.pos_param_block.required_params) != 1 or \
        terminate.pos_param_block.required_params[0].type != integer or \
@@ -338,7 +338,7 @@ def write_args(dest_label, label_type, pos_args, kw_args, extra_indent=0):
             print(' ' * indent,
                   f'*({translate_type(type)} *)'
                   f'param_location({dest_label}, {keyword}, {i}) = '
-                  f'{arg.get_step().code};',
+                  f'{arg.deref().code};',
                   sep='', file=C_file)
     write_pb(label_type.required_params, label_type.optional_params, pos_args)
     for keyword, args in kw_args:
@@ -348,10 +348,10 @@ def write_args(dest_label, label_type, pos_args, kw_args, extra_indent=0):
 
 def write_goto_details(self, module, extra_indent):
     indent = extra_indent + 4
-    primary = self.primary.get_step()
+    primary = self.primary.deref()
     label = primary.code
     print(' ' * indent, f'({label})->params_passed = 0;', sep='', file=C_file)
-    write_args(label, primary.type.get_type(),
+    write_args(label, primary.type.deref(),
                self.arguments[0], self.arguments[1], extra_indent)
     print(' ' * indent, f'goto *({label})->label;', sep='', file=C_file)
 symtable.Goto.write_code_details = write_goto_details
@@ -372,7 +372,7 @@ symtable.Return.write_code_details = write_return_details
 
 def check_call_running(self, extra_indent):
     indent = extra_indent + 4
-    label = self.primary.get_step().code
+    label = self.primary.deref().code
     print(' ' * indent,
           f"if (({label})->params_passed & FLAG_RUNNING) {{",
           sep='', file=C_file)
@@ -391,9 +391,9 @@ symtable.Call_fn.write_check_running = check_call_running
 
 def write_call_details(self, module, extra_indent):
     indent = extra_indent + 4
-    primary = self.primary.get_step()
+    primary = self.primary.deref()
     label = primary.code
-    write_args(label, primary.type.get_type(),
+    write_args(label, primary.type.deref(),
                self.arguments[0], self.arguments[1], extra_indent)
     print(' ' * indent,
           f'({label})->return_label = {self.returning_to.code};',
@@ -418,7 +418,7 @@ symtable.Done_statement.write_code_details = write_done_details
 
 def write_done(done_label, containing_label, extra_indent):
     indent = extra_indent + 4
-    done_label_code = done_label.get_step().code
+    done_label_code = done_label.deref().code
     extra_indent += 4
     print(' ' * indent,
           f"if (!(({done_label_code})->params_passed & FLAG_RUNNING)) {{",
@@ -493,7 +493,7 @@ def write_label_descriptor(label, module):
         print('    "module",   // type', file=C_file)
     else:
         print(f'    "{label.name.value}",   // name', file=C_file)
-        print(f'    "{label.type.get_type().label_type}",   // type',
+        print(f'    "{label.type.deref().label_type}",   // type',
               file=C_file)
     param_blocks = tuple(label.gen_param_blocks())
     print(f'    {len(param_blocks)},   // num_param_blocks', file=C_file)
@@ -576,14 +576,14 @@ def compile_literal(literal, module, last_label, last_fn_subr):
 def compile_subscript(subscript, module, last_label, last_fn_subr):
     subscript.precedence, subscript.assoc = Precedence_lookup['[']
     array_code = wrap(subscript.array_expr, subscript.precedence, 'left')
-    sub_codes = [sub_expr.get_step().code
+    sub_codes = [sub_expr.deref().code
                  for sub_expr in subscript.subscript_exprs]
     subscripts = ''.join(f"[{sub}]" for sub in sub_codes)
     subscript.code = f"{array_code}{subscripts}"
     subscript.prep_statements += tuple(
       f'range_check(&{subscript.containing_label.N_label_descriptor_name}, '
                   f'{sub}, {dim});'
-      for dim, sub in zip(subscript.array_expr.get_step().dimensions, sub_codes)
+      for dim, sub in zip(subscript.array_expr.deref().dimensions, sub_codes)
     )
 
 
@@ -619,9 +619,9 @@ def compile_call_fn(self, module, last_label, last_fn_subr):
 def write_call_fn_call(self, extra_indent):
     indent = extra_indent + 4
     self.write_check_running(extra_indent)
-    primary = self.primary.get_step()
+    primary = self.primary.deref()
     label = primary.code
-    write_args(label, primary.type.get_type(),
+    write_args(label, primary.type.deref(),
                self.pos_arguments, self.kw_arguments, extra_indent)
     print(' ' * indent, f'({label})->return_label = {self.ret_label.code};',
           sep='', file=C_file)
@@ -748,8 +748,8 @@ Reserved_words = frozenset((
 def gen_abs(expr):
     precedence, assoc = Precedence_lookup['(']
     if expr.type.is_integer():
-        return precedence, assoc, f"abs({expr.get_step().code})"
-    return precedence, assoc, f"fabs({expr.get_step().code})"
+        return precedence, assoc, f"abs({expr.deref().code})"
+    return precedence, assoc, f"fabs({expr.deref().code})"
 
 
 Unary_exprs = {
