@@ -15,7 +15,7 @@ from robot_brains.symtable import (
     Variable, Required_parameter, Optional_parameter,
     Continue, Set, Goto, Return, Call_statement, Opeq_statement, Done_statement,
     Literal, Reference, Dot, Subscript, Got_keyword, Got_param, Call_fn,
-    Unary_expr, Binary_expr, Builtin_type, Typename_type, Label_type,
+    Unary_expr, Binary_expr, Builtin_type, Label_type,
 )
 
 
@@ -46,7 +46,6 @@ def p_empty_tuple(p):
     steps :
     statements :
     action_statements :
-    dotted_prefix :
     '''
     p[0] = ()
 
@@ -59,6 +58,8 @@ def p_first(p):
                | BOOLEAN_LIT
     expr : primary
     primary : simple_primary
+    simple_primary : ref_primary
+    simple_type : ref_primary
     native_element : primary
                    | NATIVE_STRING_LIT
     type : simple_type
@@ -74,7 +75,7 @@ def p_first(p):
 
 def p_second(p):
     '''
-    simple_primary : '(' expr ')'
+    primary : '(' expr ')'
     simple_type : '(' type ')'
     const_expr : '(' const_expr ')'
     returning_opt : RETURNING parameter_types
@@ -139,7 +140,6 @@ def p_append(p):
     action_statements : action_statements simple_statement newlines
     action_statements : action_statements continue newlines
     native_elements : native_elements native_element
-    dotted_prefix : dotted_prefix IDENT '.'
     '''
     p[0] = p[1] + (p[2],)
 
@@ -223,11 +223,6 @@ def p_builtin_type(p):
     p[0] = Builtin_type(p[1].lower())
 
 
-def p_typename(p):
-    "simple_type : dotted_prefix IDENT"
-    p[0] = Typename_type(p[1] + (p[2],))
-
-
 def p_dimension(p):
     '''
     dimension : const_expr
@@ -263,7 +258,7 @@ def p_return_label2(p):
 
 def p_primary_ident(p):
     """
-    simple_primary : IDENT
+    ref_primary : IDENT
     lvalue : IDENT
     """
     p[0] = Reference(p[1])
@@ -271,7 +266,8 @@ def p_primary_ident(p):
 
 def p_primary_dot(p):
     """
-    simple_primary : simple_primary '.' IDENT
+    ref_primary : simple_primary '.' IDENT
+    ref_primary : simple_primary '.' TYPE
     lvalue : simple_primary '.' IDENT
     """
     p[0] = Dot(p[1], p[3])

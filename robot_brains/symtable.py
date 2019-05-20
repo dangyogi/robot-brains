@@ -344,6 +344,7 @@ class Typedef(Entity):
 
 
 class Type(Symtable):
+    immediate = True
     any_type = False
 
     def __eq__(self, b):
@@ -351,6 +352,10 @@ class Type(Symtable):
 
     def __hash__(self):
         return hash((self.__class__, self.cmp_params()))
+
+    @property
+    def value(self):
+        return self
 
     def deref(self):
         return self
@@ -456,63 +461,6 @@ class Builtin_type(Type):
         if not (self.name == arg_type.name or \
                 self.name == 'float' and arg_type.name == 'integer'):
             reporter.report(f"Incompatible types, {self} and {arg_type}")
-
-
-class Typename_type(Type):
-    def __init__(self, path):
-        self.path = path
-        self.lexpos, self.lineno, self.filename = \
-          self.path[-1].lexpos, self.path[-1].lineno, self.path[-1].filename
-
-    def __repr__(self):
-        return f"<Typename {self}>"
-
-    def __str__(self):
-        return '.'.join(p.value for p in self.path)
-
-    def cmp_params(self):
-        return self.typedef.cmp_params()
-
-    def deref(self):
-        r'Only valid after prepared.'
-        return self.typedef.type.deref()
-
-    def do_prepare(self, module):
-        super().do_prepare(module)
-        for p in self.path[:-1]:
-            module = lookup(p, module)
-            if not isinstance(module, Use):
-                scanner.syntax_error("Must be defined as a MODULE, "
-                                       f"not a {module.__class__.__name__}",
-                                     p.lexpos, p.lineno, p.filename)
-            module = module.module
-        self.typedef = lookup(self.path[-1], module)
-        if not isinstance(self.typedef, Typedef):
-            scanner.syntax_error("Must be defined as a TYPE, "
-                                   f"not a {self.typedef.__class__.__name__}",
-                                 self.path[-1].lexpos, self.path[-1].lineno,
-                                 self.path[-1].filename)
-
-    def is_numeric(self):
-        return self.typedef.type.is_numeric()
-
-    def is_integer(self):
-        return self.typedef.type.is_integer()
-
-    def is_float(self):
-        return self.typedef.type.is_float()
-
-    def is_string(self):
-        return self.typedef.type.is_string()
-
-    def is_boolean(self):
-        return self.typedef.type.is_boolean()
-
-    def is_module(self):
-        return self.typedef.type.is_module()
-
-    def is_type(self):
-        return self.typedef.type.is_type()
 
 
 class Label_type(Type):
@@ -1812,10 +1760,8 @@ class Literal(Expr):
         return f"<Literal {self.value!r}>"
 
 
-class Reference(Expr, Type):
-    r'''An IDENT that references either a Variable or Label.
-
-    Type IDENTs are converted to Typename_types rather than References.
+class Reference(Expr):
+    r'''An IDENT that references a Variable, Label, Typedef or Use.
     '''
     is_type = False
 
@@ -1827,14 +1773,6 @@ class Reference(Expr, Type):
     def __repr__(self):
         return f"<Reference {self.ident.value}>"
 
-    def __eq__(self, b):
-        assert self.is_type
-        return self.referent.deref() == b
-
-    def __hash__(self):
-        assert self.is_type
-        return hash(self.referent.deref())
-
     def deref(self):
         return self.referent.deref()
 
@@ -1842,8 +1780,8 @@ class Reference(Expr, Type):
         current_namespace().make_variable(self.ident)
         self.as_lvalue = True
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self, module):
+        super().do_prepare(module)
 
         # These should be the same for all instances (since the type is
         # defined in the module and can't be passed in as a module parameter).
@@ -1870,6 +1808,10 @@ class Reference(Expr, Type):
                                      self.ident.lexpos, self.ident.lineno,
                                      self.ident.filename)
 
+    def do_prepare_step(self, module, last_label, last_fn_subr):
+        super().do_prepare_step(module, last_label, last_fn_subr)
+        self.prepare(module)
+
 
 class Dot(Expr):
     precedence = 100
@@ -1882,36 +1824,53 @@ class Dot(Expr):
         self.as_lvalue = False
 
     def __repr__(self):
+        if self.ident == 'type':
+            return f"<Dot {self.expr} TYPE>"
         return f"<Dot {self.expr} {self.ident.value}>"
+
+    def deref(self):
+        return self.referent.deref()
 
     def set_as_lvalue(self):
         #current_namespace().make_variable(self.ident)
         self.as_lvalue = True
 
+    def do_prepare(self, module):
+        super().do_prepare(module)
+        self.prepare_step(module, None, None)
+
     # self.type has to be done for each instance...
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         self.expr.prepare_step(module, last_label, last_fn_subr)
-        if not self.expr.deref().immediate or \
-           not isinstance(self.expr.deref().value, Module):
-            scanner.syntax_error("Module expected",
-                                 self.expr.lexpos, self.expr.lineno,
-                                 self.expr.filename)
-        self.referent = self.expr.deref().value.lookup(self.ident)
-        self.type = self.referent.type
-        step = self.referent.deref()
-        if self.as_lvalue:
-            if not isinstance(step, Variable):
-                scanner.syntax_error("Variable expected",
-                                     self.ident.lexpos, self.ident.lineno,
-                                     self.ident.filename)
-            self.var_set = step
-        else:
-            if isinstance(step, Variable):
-                self.vars_used = frozenset((step,))
-        if step.immediate:
+        if self.ident == 'type':
+            if not self.expr.deref().immediate:
+                scanner.syntax_error("Compile-time value expected with .TYPE",
+                                     self.expr.lexpos, self.expr.lineno,
+                                     self.expr.filename)
             self.immediate = True
-            self.value = step.value
+            self.value = self.referent = self.type = self.expr.deref().type
+        else:
+            if not self.expr.deref().immediate or \
+               not isinstance(self.expr.deref().value, Module):
+                scanner.syntax_error("Module expected",
+                                     self.expr.lexpos, self.expr.lineno,
+                                     self.expr.filename)
+            self.referent = self.expr.deref().value.lookup(self.ident)
+            self.type = self.referent.type
+            step = self.referent.deref()
+            if self.as_lvalue:
+                if not isinstance(step, Variable):
+                    scanner.syntax_error("Variable expected",
+                                         self.ident.lexpos, self.ident.lineno,
+                                         self.ident.filename)
+                self.var_set = step
+            else:
+                if isinstance(step, Variable):
+                    self.vars_used = frozenset((step,))
+            if step.immediate:
+                self.immediate = True
+                self.value = step.value
 
     @property
     def code(self):

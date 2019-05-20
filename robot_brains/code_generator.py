@@ -126,6 +126,5 @@ def translate_type(type):
         return Target_language.Types[type.name.lower()]
     if isinstance(type, symtable.Label_type):
         return Target_language.translate_label_type(type)
-    assert isinstance(type, symtable.Typename_type)
-    return translate_type(type.typedef.type)
+    assert False, f"Unknown type {type}"
 
