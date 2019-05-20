@@ -10,7 +10,7 @@ operator precedence (highest to lowest)
     NOT (nonassoc)
 
 
-source_file : opmode | module
+source_file : {NEWLINE} (opmode | module)
 
 
 opmode : (AUTONOMOUS | TELEOP) OPMODE NEWLINES
@@ -31,11 +31,25 @@ use : USE IDENT [AS IDENT] arguments NEWLINES
 typedef : TYPE IDENT IS type NEWLINES
 
 
-type : FUNCTION [TAKING parameter_types] [RETURNING parameter_types]
+type : simple_type
+     | FUNCTION [TAKING parameter_types] [RETURNING parameter_types]
      | SUBROUTINE [TAKING parameter_types]
      | LABEL [TAKING parameter_types]
-     | IDENT
-     | MODULE
+
+
+simple_type : ref_primary
+            | '(' type ')'
+            | TYPE
+
+
+ref_primary : INTEGER
+            | FLOAT
+            | BOOLEAN
+            | STRING
+            | MODULE
+            | IDENT
+            | simple_primary '.' IDENT
+            | simple_primary '.' TYPE
 
 
 parameter_types : pos_parameter_types1
@@ -82,13 +96,12 @@ statement : simple_statement NEWLINES
           | dlt
 
 
-simple_statement : GOTO primary arguments
-                 | SET lvalue TO: primary
+simple_statement : SET lvalue TO: primary
+                 | GOTO primary arguments
                  | RETURN arguments [FROM: primary] [TO: primary]
                  | primary arguments [RETURNING_TO: primary]
-                 | primary ('+='|'-='|'*='|'/='|'%='|'^=') primary
-                 | DONE
-                 | DONE WITH: IDENT
+                 | lvalue ('+='|'-='|'*='|'/='|'%='|'^=') primary
+                 | DONE [WITH: IDENT]
                  | native_elements
 
 
@@ -138,17 +151,16 @@ expr : primary
 
 
 primary : simple_primary
-        | STRING | FLOAT | INTEGER | BOOL | IDENT
+        | '(' expr ')'
+        | STRING | FLOAT | INTEGER | BOOL
         | GOT? [(MODULE | IDENT) '.'] KEYWORD
         | GOT? [(MODULE | IDENT) '.'] IDENT
 
 
-simple_primary : '(' expr ')'
-               | IDENT
-               | simple_primary '.' IDENT
-               | simple_primary '[' subscripts ']'
+simple_primary : ref_primary
                | RETURN_LABEL
                | simple_primary '.' RETURN_LABEL
+               | simple_primary '[' subscripts ']'
                | '{' primary arguments '}'
 
 

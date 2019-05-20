@@ -213,12 +213,12 @@ def p_label_type2(p):
 
 def p_builtin_type(p):
     """
-    simple_type : INTEGER
+    ref_primary : INTEGER
                 | FLOAT
                 | BOOLEAN
                 | STRING
                 | MODULE
-                | TYPE
+    simple_type : TYPE
     """
     p[0] = Builtin_type(p[1].lower())
 
