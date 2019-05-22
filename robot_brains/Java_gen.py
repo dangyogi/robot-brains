@@ -17,7 +17,9 @@ from robot_brains.code_generator import (
 
 NUM_FLAG_BITS = 63
 
-Illegal_chars = "?"
+
+Illegal_chars = {"?": "__Q__"}
+
 
 Assign_names = []
 Gen_step_code = []
@@ -163,9 +165,10 @@ def write_module_instance_definition(module):
     print(f"struct {module.N_struct_name} {{", file=Java_file)
     print("    struct module_descriptor_s *descriptor;", file=Java_file)
     for var in module.filter(symtable.Variable):
-        dims = ''.join(f"[{d}]" for d in var.dimensions)
-        print(f"    {translate_type(var.type)} {var.N_local_name}{dims};",
-              file=Java_file)
+        if not var.hidden:
+            dims = ''.join(f"[{d}]" for d in var.dimensions)
+            print(f"    {translate_type(var.type)} {var.N_local_name}{dims};",
+                  file=Java_file)
     for label in module.filter(symtable.Label):
         if label.needs_dlt_mask:
             print(f"    unsigned long {label.N_dlt_mask_name};", file=Java_file)
@@ -334,11 +337,13 @@ def write_args(dest_label, label_type, pos_args, kw_args, extra_indent=0):
         else:
             keyword = f'"{pb_name}"'
         for i, (type, arg) in enumerate(zip(chain(req_types, opt_types), args)):
-            print(' ' * indent,
-                  f'*({translate_type(type)} *)'
-                  f'param_location({dest_label}, {keyword}, {i}) = '
-                  f'{arg.deref().code};',
-                  sep='', file=Java_file)
+            type = type.deref()
+            if not type.hidden:
+                print(' ' * indent,
+                      f'*({translate_type(type)} *)'
+                      f'param_location({dest_label}, {keyword}, {i}) = '
+                      f'{arg.deref().code};',
+                      sep='', file=Java_file)
     write_pb(label_type.required_params, label_type.optional_params, pos_args)
     for keyword, args in kw_args:
         opt, req_types, opt_types = label_type.kw_params[keyword]
@@ -508,19 +513,21 @@ def write_label_descriptor(label, module):
             print(f'        "{pb.name.value[1:]}",   // name', file=Java_file)
         else:
             print(f'        "{pb.name.value}",   // name', file=Java_file)
-        print(f'        {len(pb.required_params) + len(pb.optional_params)},'
+        print(f'        {pb.num_required_params + pb.num_optional_params},'
                 '   // num_params',
               file=Java_file)
-        print(f'        {len(pb.required_params)},   // num_required_params',
+        print(f'        {pb.num_required_params},   // num_required_params',
               file=Java_file)
-        print(f'        {len(pb.optional_params)},   // num_optional_params',
+        print(f'        {pb.num_optional_params},   // num_optional_params',
               file=Java_file)
         param_locations = ", ".join(
-          f"&{module.N_global_name}.{p.variable.N_local_name}"
+          ("NULL" if p.hidden
+                  else f"&{module.N_global_name}.{p.variable.N_local_name}")
           for p in pb.gen_parameters())
         print(f'        (void *[]){{{param_locations}}},   // param_locations',
               file=Java_file)
-        var_set_masks = ", ".join(hex(1 << p.variable.set_bit)
+        var_set_masks = ", ".join(("0" if p.hidden
+                                       else hex(1 << p.variable.set_bit))
                                   for p in pb.gen_parameters())
         print(f'        (unsigned long []){{{var_set_masks}}},'
                 '// var_set_masks',

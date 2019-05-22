@@ -146,6 +146,7 @@ class Variable(Entity):
     dimensions = ()   # (int, ...)
     immediate = False
     constant = False
+    hidden = False
     prep_statements = ()
     vars_used = frozenset()
 
@@ -164,12 +165,14 @@ class Variable(Entity):
         print(f" type={self.type}", end='', file=f)
 
     def do_prepare(self, module):
+        #print(f"Variable({self.name.value}).do_prepare")
         super().do_prepare(module)
         if not self.dimensions:
             self.set_bit = module.next_set_bit
             self.vars_used = frozenset((self,))
             module.next_set_bit += 1
         self.type.prepare(module)
+        #print(f"Variable({self.name.value}).do_prepare -- done")
 
     def set_module(self, module):
         # FIX: never called...
@@ -209,6 +212,8 @@ class Required_parameter(Symtable):
     self.passed_bit is bit number in label.params_passed
     self.param_pos_number assigned in Param_block.add_parameter.
     '''
+    hidden = False
+
     def __init__(self, ident, label=None):
         self.name = ident
         if label is None:
@@ -230,6 +235,7 @@ class Required_parameter(Symtable):
 
     def do_prepare(self, module):
         super().do_prepare(module)
+        self.variable.prepare(module)
         self.type = self.variable.type
 
 
@@ -276,22 +282,30 @@ class Use(Entity):
         #print("Use.prepare_used_module", module, self.module_name)
         self.run_pre_hooks("prepare_used_module", module)
         for expr in self.pos_arguments:
-            expr.prepare_step(module, None, None)
+            if isinstance(expr, Step):
+                expr.prepare_step(module, None, None)
+            else:
+                expr.prepare(module)
         for _, exprs in self.kw_arguments:
             for expr in exprs:
-                expr.prepare_step(module, None, None)
+                if isinstance(expr, Step):
+                    expr.prepare_step(module, None, None)
+                else:
+                    expr.prepare(module)
         #print("Use.prepare_used_module", module, self.module_name,
         #      "done with arguments")
 
         #print(module, "use passing constant module parameters")
+
+        pass_args(self.module, self.pos_arguments, self.kw_arguments,
+                  Use_param_compiler())
 
         self.module.prepare_module()
 
         self.module.params_type.satisfied_by_arguments(
                                   Error_reporter(self.name),
                                   self.pos_arguments, self.kw_arguments)
-        pass_args(self.module, self.pos_arguments, self.kw_arguments,
-                  Use_param_compiler())
+        self.module.prepare_used_modules()
         self.run_post_hooks("prepare_used_module", module)
         #print("Use.prepare_used_module", module, self.module_name, "done")
 
@@ -346,6 +360,7 @@ class Typedef(Entity):
 class Type(Symtable):
     immediate = True
     any_type = False
+    hidden = False
 
     def __eq__(self, b):
         return type(self) == type(b) and self.cmp_params() == b.cmp_params()
@@ -460,7 +475,11 @@ class Builtin_type(Type):
     def _can_take_type(self, reporter, arg_type):
         if not (self.name == arg_type.name or \
                 self.name == 'float' and arg_type.name == 'integer'):
+            # FIX
+            print("from Builtin_type")
             reporter.report(f"Incompatible types, {self} and {arg_type}")
+
+Type.type = Builtin_type('type')
 
 
 class Label_type(Type):
@@ -587,6 +606,8 @@ class Label_type(Type):
         
         Without anything extra that I don't know about?
 
+        req and opt are (type, ...)
+
         kw_params is {KEYWORD_TOKEN: (kw_optional, (type, ...), (type, ...))}
 
         Calls reporter.report to report errors.  Expects it to raise an
@@ -594,6 +615,8 @@ class Label_type(Type):
 
         Does not check return types.
         '''
+
+        #print("satisfied_by", req, opt)
 
         def check_pos_params(reporter, receiving_req, receiving_opt,
                              sending_req, sending_opt):
@@ -654,6 +677,7 @@ class Label_type(Type):
 
         Does not check return type.
         '''
+        #print("satisfied_by_arguments", pos_arguments)
         self.satisfied_by(reporter,
                           tuple(e.type for e in pos_arguments),
                           (),
@@ -700,6 +724,8 @@ class Param_block(Symtable):
 
     def gen_parameters(self):
         r'''Generates all parameter objects, both required and optional.
+        
+        Also generates hidden parameters.
         '''
         yield from self.required_params
         yield from self.optional_params
@@ -719,6 +745,8 @@ class Param_block(Symtable):
     def do_prepare(self, module):
         super().do_prepare(module)
         #print("Param_block.do_prepare")
+        self.num_required_params = len(self.required_params)
+        self.num_optional_params = len(self.optional_params)
         for p in self.gen_parameters():
             #print("Param_block.do_prepare", p)
             p.prepare(module)
@@ -839,6 +867,9 @@ class Opmode(Namespace):
     def set_in_namespace(self, namespace=None):
         pass
 
+    def deref(self):
+        return self
+
     #def dump_details(self, f):
     #    super().dump_details(f)
     #    print(f" modules_seen: {','.join(self.modules_seen.keys())}",
@@ -861,8 +892,10 @@ class Opmode(Namespace):
         self.link_uses()
         print("setup: doing prepare")
         builtins.prepare_module()
+        builtins.prepare_used_modules()
         builtins.prepare_module_steps()
         self.prepare_module()
+        self.prepare_used_modules()
         self.prepare_module_steps()
         print("setup: done")
 
@@ -881,16 +914,22 @@ class Opmode(Namespace):
         self.run_pre_hooks("prepare_module")
         self.do_prepare_module()
         self.run_post_hooks("prepare_module")
+        #print(self.name, self.__class__.__name__, "prepare_module -- done")
 
     def do_prepare_module(self):
         #print("Opmode.do_prepare_module", self.__class__.__name__, self.name)
-        self.prepare_entities()
         self.prepare(self)   # declared in With_parameters
+
+    def prepare_used_modules(self):
+        #print(self.name, self.__class__.__name__, "prepare_used_modules")
+        self.prepare_entities()
         for use in self.filter(Use):
             #print(self.name, "link_uses doing", use)
             use.prepare_used_module(self)
         print(self.name, self.__class__.__name__,
               "number of var-set bits used", self.next_set_bit)
+        #print(self.name, self.__class__.__name__,
+        #      "prepare_used_modules -- done")
 
     def prepare_module_steps(self):
         for use in self.filter(Use):
@@ -1006,19 +1045,27 @@ class Module(With_parameters, Opmode):
             step.dump(f, indent)
 
     def do_prepare_module(self):
-        r'''Only called on builtins module.
+        r'''Only called by setup on builtins module.
         '''
-        super().do_prepare_module()
+        super().do_prepare_module()  # prepares parameters
+
         # Make all module parameters constant variables.
+        #
+        # Also hide module and type parameters.
         for pb in self.gen_param_blocks():
             for p in pb.gen_parameters():
                 p.variable.constant = True
+                if p.variable.type == Builtin_type('module') or \
+                   p.variable.type == Builtin_type('type'):
+                    p.hidden = True
+                    p.variable.hidden = True
+                    p.variable.type.hidden = True
 
         self.params_type = Label_type('label', self.as_taking_blocks())
         self.params_type.prepare(self)
 
     def prepare_module_steps(self):
-        print(self, "prepare_module_steps")
+        #print(self, "prepare_module_steps")
         last_label = None
         last_fn_subr = None
         for step, next_step in pairwise(self.steps):
@@ -1230,7 +1277,7 @@ class Set(Statement):
     def do_prepare_step(self, module, last_label, last_fn_subr):
         super().do_prepare_step(module, last_label, last_fn_subr)
         self.lvalue.type.deref().can_take_type(Error_reporter(self.primary),
-                                                  self.primary.type)
+                                               self.primary.type)
 
 
 class Native:
@@ -1774,7 +1821,12 @@ class Reference(Expr):
         return f"<Reference {self.ident.value}>"
 
     def deref(self):
-        return self.referent.deref()
+        try:
+            return self.referent.deref()
+        except AttributeError:
+            print("Reference", self.ident.value, self.ident.filename,
+                  self.ident.lineno)
+            raise
 
     def set_as_lvalue(self):
         current_namespace().make_variable(self.ident)
@@ -1786,7 +1838,7 @@ class Reference(Expr):
         # These should be the same for all instances (since the type is
         # defined in the module and can't be passed in as a module parameter).
         self.referent = lookup(self.ident, module)
-        self.type = self.referent.type
+        self.type = self.referent.deref().type
         #print("Reference", self.ident, "found", self.referent)
         if isinstance(self.referent.deref(), (Variable, Label)):
             self.prep_statements = self.referent.deref().prep_statements
@@ -1853,7 +1905,8 @@ class Dot(Expr):
         else:
             if not self.expr.deref().immediate or \
                not isinstance(self.expr.deref().value, Module):
-                scanner.syntax_error("Module expected",
+                scanner.syntax_error(f"Module expected, got {self.expr.deref()}"
+                                       f" {self.expr.deref().immediate}",
                                      self.expr.lexpos, self.expr.lineno,
                                      self.expr.filename)
             self.referent = self.expr.deref().value.lookup(self.ident)
@@ -2316,12 +2369,14 @@ class Use_param_compiler:
         param.passed = passed
 
     def pair_param(self, param_block, param, expr):
-        type = param.variable.type.deref()
         if expr.deref().immediate:
             param.variable.immediate = True
             param.variable.value = expr.deref().value
+            print(f"Use setting {param} to {param.variable.value}")
             # We can skip setting the bit in module.vars_set since there is no
             # way to test those bits in the code...
+        else:
+            print(f"Use skipping {param} with {expr}")
 
 
 class Error_reporter:

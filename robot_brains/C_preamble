@@ -207,11 +207,11 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
     if (n >= pb->num_params) {
         if (keyword == NULL) {
             fprintf(stderr,
-              "Internal Error: pos params, %d greater than num params\n",
+              "Internal Error: pos params, %d greater than num_params\n",
               n);
         } else {
             fprintf(stderr,
-              "Internal Error: KEYWORD, '%s', %d greater than num params\n",
+              "Internal Error: KEYWORD, '%s', %d greater than num_params\n",
               keyword, n);
         }
         terminate(1);
@@ -221,6 +221,16 @@ param_location(struct label_descriptor_s *dest_label, char *keyword, int n) {
           pb->param_masks[n - pb->num_required_params];
     }
     dest_label->module->vars_set |= pb->var_set_masks[n];
-    return pb->param_locations[n];
+    void *ans = pb->param_locations[n];
+    if (ans == NULL) {
+        if (keyword == NULL) {
+            fprintf(stderr, "Internal Error: pos params, %d is hidden\n", n);
+        } else {
+            fprintf(stderr, "Internal Error: KEYWORD, '%s', %d is hidden\n",
+                    keyword, n);
+        }
+        terminate(1);
+    }
+    return ans;
 }
 

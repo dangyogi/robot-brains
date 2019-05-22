@@ -4,9 +4,11 @@
 
     1. runs link_uses() on builtins and then itself
     2. runs prepare_module() on builtins
-    3. runs prepare_module_steps() on builtins
-    4. runs prepare_module() on itself
-    5. runs prepare_module_steps() on itself
+    3. runs prepare_used_modules() on builtins
+    4. runs prepare_module_steps() on builtins
+    5. runs prepare_module() on itself
+    6. runs prepare_used_modules() on itself
+    7. runs prepare_module_steps() on itself
 
 
 - Opmode.link_uses()    <hooked>
@@ -26,16 +28,19 @@
 
 - Opmode.prepare_module():  <hooked>
   called on each module instance
-
-  - self.prepare_entities()  <hooked>
-    - calls prepare(self) on each named Entity in the Namespace
   - self.prepare(self)
-  - for each Use object:
-    - prepare_used_module(self)
+
   - Module.do_prepare_module() also does:
     - set param.variable.constant = True on all module parameters
     - create self.params_type (as a Label_type) representing the module
       parameters
+
+
+- Opmode.prepare_used_modules():
+  - self.prepare_entities()  <hooked>
+    - calls prepare(self) on each named Entity in the Namespace
+  - for each Use object:
+    - prepare_used_module(self)
 
 
 Opmode.prepare_module_steps():
@@ -95,9 +100,10 @@ Opmode.prepare_module_steps():
 - Use.prepare_used_module(module)   <hooked>
 
   - call prepare_step(module, None, None) on all module arguments
+  - pass constant module parameters, set all module parameter 'passed' bits
   - call self.module.prepare_module()
   - check module argument types/numbers
-  - pass constant module parameters, set all module parameter 'passed' bits
+  - call self.module.prepare_used_modules()
 
 
 - Step.prepare_step(module, last_label, last_fn_subr)  <hooked>

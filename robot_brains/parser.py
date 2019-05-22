@@ -769,7 +769,7 @@ def compile():
     try:
         generate(opmode)
     except SyntaxError:
-        #raise
+        raise
         sys.exit(1)
 
 

@@ -113,11 +113,12 @@ def subscript(left, right):
 def translate_name(name):
     if isinstance(name, Token):
         name = name.value
-    if name[-1] in Target_language.Illegal_chars:
-        return name[:-1].lower() + '_'
-    if name.lower() in Target_language.Reserved_words:
-        return name.lower() + '_'
-    return name.lower()
+    name = name.lower()
+    for k, v in Target_language.Illegal_chars.items():
+        name = name.replace(k, v)
+    if name in Target_language.Reserved_words:
+        name = name + '_'
+    return name
 
 
 def translate_type(type):
