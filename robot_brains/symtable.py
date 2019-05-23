@@ -188,12 +188,6 @@ class Variable(Entity):
         self.type.prepare()
         #print(f"Variable({self.name.value}).do_prepare -- done")
 
-    def set_module(self, module):
-        # FIX: never called...
-        self.immediate = True
-        assert module.immediate
-        self.value = module.value
-
     def deref(self):
         if self.immediate:
             return self.value.deref()
@@ -471,8 +465,6 @@ class Builtin_type(Type):
     def _can_take_type(self, reporter, arg_type):
         if not (self.name == arg_type.name or \
                 self.name == 'float' and arg_type.name == 'integer'):
-            # FIX
-            print("from Builtin_type")
             reporter.report(f"Incompatible types, {self} and {arg_type}")
 
 Type.type = Builtin_type('type')
