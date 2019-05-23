@@ -15,7 +15,7 @@ from robot_brains.symtable import (
     Variable, Required_parameter, Optional_parameter,
     Continue, Set, Goto, Return, Call_statement, Opeq_statement, Done_statement,
     Literal, Reference, Dot, Subscript, Got_keyword, Got_param, Call_fn,
-    Unary_expr, Binary_expr, Builtin_type, Label_type,
+    Unary_expr, Binary_expr, Builtin_type, Label_type, init_symtable,
 )
 
 
@@ -293,7 +293,7 @@ def p_primary_got_keyword2(p):
 
 def p_primary_got_keyword3(p):
     "primary : GOT MODULE '.' KEYWORD"
-    p[0] = Got_keyword(p.lexpos(1), p.lineno(1), p[4], module=True)
+    p[0] = Got_keyword(p.lexpos(1), p.lineno(1), p[4], in_module=True)
 
 
 def p_primary_got_param1(p):
@@ -308,7 +308,7 @@ def p_primary_got_param2(p):
 
 def p_primary_got_param3(p):
     "primary : GOT MODULE '.' IDENT"
-    p[0] = Got_param(p.lexpos(1), p.lineno(1), p[4], module=True)
+    p[0] = Got_param(p.lexpos(1), p.lineno(1), p[4], in_module=True)
 
 
 def p_unary_expr(p):
@@ -694,6 +694,7 @@ def parse_opmode(filename, debug=False):
 
     def parse(filename, file_type='module', debug=False):
         #print("parse", filename, file_type)
+        init_symtable()
         lexer = lex_file(filename)
         ans = parser.parse(lexer=lexer, tracking=True, debug=debug)
         check_for_errors()

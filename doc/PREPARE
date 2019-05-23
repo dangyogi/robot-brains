@@ -1,24 +1,39 @@
+After doing link_uses to recursively deepcopy the used Modules, Modules are
+prepared in 3 steps:
+
+  1. prepare_module_parameters
+     - called by setup and Use.prepare
+     - only prepares the module parameters
+  2. prepare_entities
+     - called by setup and Use.prepare
+     - calls prepare on each named Entity in the module
+  3. prepare_module_steps
+     - called by setup, recurses on Used modules
+     - calls prepare on each step in the module
+
+
 - Opmode.setup()
 
   - The whole prepare process is run by calling 'setup()' on the opmode.  This:
 
     1. runs link_uses() on builtins and then itself
-    2. runs prepare_module() on builtins
-    3. runs prepare_used_modules() on builtins
+       This recursively deepcopies all used modules
+    2. runs prepare_module_parameters() on builtins
+    3. runs prepare_entities() on builtins
     4. runs prepare_module_steps() on builtins
-    5. runs prepare_module() on itself
-    6. runs prepare_used_modules() on itself
+    5. runs prepare_module_parameters() on itself
+    6. runs prepare_entities() on itself
     7. runs prepare_module_steps() on itself
 
 
 - Opmode.link_uses()    <hooked>
-
-  Does a deepcopy on each used module.
+  Recursively deepcopies all used modules.  Does NOT prepare _anything_!
 
   - calls copy_module() on each Use object
 
 
 - Use.copy_module()     // called by module.link_uses()
+  Recursively deepcopies all used modules
 
   - looks up self.module_name in Opmode_module.modules_seen
   - does a deepcopy on it
@@ -26,122 +41,117 @@
   - calls self.module.link_uses()
 
 
-- Opmode.prepare_module():  <hooked>
-  called on each module instance
-  - self.prepare(self)
+- Opmode.prepare_module_parameters():  <hooked>
+  Called on each module instance.
+  Prepares the module's parameters.
 
-  - Module.do_prepare_module() also does:
+  - self.prepare()   # defined in With_parameters
+
+  - Module.do_prepare_module_parameters() also does:
     - set param.variable.constant = True on all module parameters
     - create self.params_type (as a Label_type) representing the module
       parameters
 
 
-- Opmode.prepare_used_modules():
-  - self.prepare_entities()  <hooked>
-    - calls prepare(self) on each named Entity in the Namespace
-  - for each Use object:
-    - prepare_used_module(self)
+- Namespace.prepare_entities():   <hooked>
+  - calls prepare() on each named Entity in the Namespace
 
 
 Opmode.prepare_module_steps():
+  Recurses on Used modules.
+
   - call prepare_module_steps on each Use.module
 
   - Module.prepare_module_steps() also does
     (before Opmode.prepare_module_steps):
-    - call prepare_step(self, last_label, last_fn_subr) on each step
+    - call prepare() on each step
       - call last_label.reset() prior to each call
     - reports syntax error on final statement errors
       - last step, and last step before label must be is_final()
       - all other steps must not be is_final()
 
 
-- Symtable.prepare(module)   <hooked>
+- Symtable.prepare()   <hooked>
 
-  - Variable.do_prepare(module)
+  - Use.prepare()
+
+    - pass constant module parameters, set all module parameter 'passed' bits
+      - for each argument:
+        - Call prepare() on the argument.
+        - Set the module parameter.
+    - call self.module.prepare_module_parameters()
+    - check module argument types/numbers
+    - call self.module.prepare_entities()
+
+  - Variable.do_prepare()
     - figure out self.set_bit
-    - call self.type.prepare(module)
+    - call self.type.prepare()
 
-  - Typedef.do_prepare(module)
-    - call self.type.prepare(module)
+  - Typedef.do_prepare()
+    - call self.type.prepare()
 
-  - Typename_type.do_prepare(module)
-    - self.typedef = lookup(self.ident, module)
-    - verify that what was found was a Typedef object
+  - Label_type.do_prepare()
+    - call prepare() on all parameters
+    - call prepare() on self.return_label_type
 
-  - Label_type.do_prepare(module)
-    - call prepare(module) on all parameters
-    - call prepare(module) on self.return_label_type
-
-  - With_parameters.do_prepare(module)
-    - call prepare(module) on each Param_block
+  - With_parameters.do_prepare()
+    - call prepare() on each Param_block
     - check for duplicate parameter names
     - assign passed bits
 
-    - Label.do_prepare(module) also does:
+    - Label.do_prepare() also does:
       - create Label_type
       - store it in self.type
-      - call prepare(module) on it
+      - call prepare() on it
 
-    - Native_subroutine.do_prepare(module) also does:
+    - Native_subroutine.do_prepare() also does:
       - create Label_type
       - store it in self.type
-      - call prepare(module) on it
+      - call prepare() on it
 
-      - Native_function.do_prepare(module) also does:
-        - call prepare(module) on self.return_type
+      - Native_function.do_prepare() also does:
+        - call prepare() on self.return_type
 
-  - Param_block.do_prepare(module)
-    - call prepare(module) on each parameter object
+  - Param_block.do_prepare()
+    - call prepare() on each parameter object
 
-  - Required_parameter.do_prepare(module)
+  - Required_parameter.do_prepare()
     - set self.type to self.variable.type
-      
 
-- Use.prepare_used_module(module)   <hooked>
+  - Statement.do_prepare
+    - call prepare on everything in self.args that isinstance of Step
 
-  - call prepare_step(module, None, None) on all module arguments
-  - pass constant module parameters, set all module parameter 'passed' bits
-  - call self.module.prepare_module()
-  - check module argument types/numbers
-  - call self.module.prepare_used_modules()
-
-
-- Step.prepare_step(module, last_label, last_fn_subr)  <hooked>
-
-  - Statement.prepare_step
-    - call prepare_step on everything in self.args that isinstance of Step
-
-    - Call_statement.do_prepare_step also does:
+    - Call_statement.do_prepare also does:
       - verify that the fn is the proper Label_type
       - verify RETURNING_TO: Label_type
       - verify RETURNING_TO: parameters against fn.type return parameters
       - verify arguments against fn.type
 
-    - Opeq_statement.do_prepare_step also does:
+    - Opeq_statement.do_prepare also does:
       - verify types of arguments against operator
 
-  - Statement_with_arguments.do_prepare_step
+  - Statement_with_arguments.do_prepare
     - self.do_pre_arg_check_prepare
     - self.label_type.satisfied_by_arguments
 
-  - DLT.do_prepare_step
-    - call conditions.prepare_step
-    - call actions.prepare_step
+  - DLT.do_prepare
+    - call conditions.prepare
+    - call actions.prepare
 
-  - Conditions.do_prepare_step
-    - call prepare_step on all exprs
+  - Conditions.do_prepare
+    - call prepare on all exprs
     - verify all exprs are boolean
 
-  - Actions.do_prepare_step
-    - call prepare_step on all actions
+  - Actions.do_prepare
+    - call prepare on all actions
 
-  - Reference.do_prepare_step
+  - Reference.do_prepare
     - lookup(ident, module)
     - store it in self.referent
     - store self.referent.type in self.type
 
-  - Dot.do_prepare_step
-    - call prepare_step on expr
+  - Dot.do_prepare
+    - call prepare on expr
     - verify that expr is immediate module
     - lookup ident in module
     - store it in self.referent
@@ -150,17 +160,16 @@ Opmode.prepare_module_steps():
       - set self.immediate
       - store self.referent.value in self.value
 
-  - Subscript.do_prepare_step ...
-  - Got_keyword.do_prepare_step ...
-  - Got_param.do_prepare_step ...
-  - Call_fn.do_prepare_step ...
-  - Unary_expr.do_prepare_step ...
-  - Binary_expr.do_prepare_step ...
-  - Return_label.do_prepare_step ...
+  - Subscript.do_prepare ...
+  - Got_keyword.do_prepare ...
+  - Got_param.do_prepare ...
+  - Call_fn.do_prepare ...
+  - Unary_expr.do_prepare ...
+  - Binary_expr.do_prepare ...
+  - Return_label.do_prepare ...
+      
 
-
-Statement_with_arguments.do_pre_arg_check_prepare(module, last_label,
-                                                  last_fn_subr)
+Statement_with_arguments.do_pre_arg_check_prepare()
   - Goto.do_pre_arg_check_prepare ...
   - Return.do_pre_arg_check_prepare ...
   - Call_statement.do_pre_arg_check_prepare ...

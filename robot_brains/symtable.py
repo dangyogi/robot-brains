@@ -8,7 +8,13 @@ from itertools import tee, zip_longest, chain
 from robot_brains import scanner
 
 
-Last_parameter_obj = None
+def init_symtable():
+    global Last_parameter_obj, Last_module, Last_label, Last_fn_subr
+
+    Last_parameter_obj = None
+    Last_module = None
+    Last_label = None
+    Last_fn_subr = None
 
 
 def pairwise(iterable, fillvalue=None):
@@ -86,7 +92,7 @@ class Hook_base:
 class Symtable(Hook_base):
     r'''Root of all symtable classes.
 
-    Defines dump, prepare and prepare_step.
+    Defines dump and prepare.
     '''
     prepared = False
 
@@ -102,16 +108,16 @@ class Symtable(Hook_base):
     def dump_contents(self, f, indent):
         pass
 
-    def prepare(self, module):
+    def prepare(self):
         r'''Called on each instance.
         '''
         if not self.prepared:
             self.prepared = True
-            self.run_pre_hooks("prepare", module)
-            self.do_prepare(module)
-            self.run_post_hooks("prepare", module)
+            self.run_pre_hooks("prepare")
+            self.do_prepare()
+            self.run_post_hooks("prepare")
 
-    def do_prepare(self, module):
+    def do_prepare(self):
         r'''Override this in the subclasses.
         '''
         pass
@@ -146,7 +152,10 @@ class Variable(Entity):
     dimensions = ()   # (int, ...)
     immediate = False
     constant = False
-    hidden = False
+    hidden = False              # Prevents variable from being added to
+                                # module instance as a true run-time variable.
+    has_expr = False            # Substitute self.expr for self
+
     prep_statements = ()
     vars_used = frozenset()
 
@@ -159,19 +168,24 @@ class Variable(Entity):
         for k, v in kws.items():
             setattr(self, k, v)
         self.parameter_list = []        # list of parameters using this Variable
+        if namespace is not None:
+            assert isinstance(namespace, Module)
+            self.module = namespace
+        else:
+            self.module = Last_module
 
     def dump_details(self, f):
         super().dump_details(f)
         print(f" type={self.type}", end='', file=f)
 
-    def do_prepare(self, module):
+    def do_prepare(self):
         #print(f"Variable({self.name.value}).do_prepare")
-        super().do_prepare(module)
+        super().do_prepare()
         if not self.dimensions:
-            self.set_bit = module.next_set_bit
+            self.set_bit = self.module.next_set_bit
             self.vars_used = frozenset((self,))
-            module.next_set_bit += 1
-        self.type.prepare(module)
+            self.module.next_set_bit += 1
+        self.type.prepare()
         #print(f"Variable({self.name.value}).do_prepare -- done")
 
     def set_module(self, module):
@@ -209,8 +223,10 @@ class Variable(Entity):
 
 class Required_parameter(Symtable):
     r'''
-    self.passed_bit is bit number in label.params_passed
+    self.passed_bit is bit number in label.params_passed (only on
+                       Optional_parameters).
     self.param_pos_number assigned in Param_block.add_parameter.
+    self.passed is set to True/False at compile time for module parameters.
     '''
     hidden = False
 
@@ -233,9 +249,9 @@ class Required_parameter(Symtable):
         if hasattr(self, 'param_pos_number'):
             print(f" param_pos_number={self.param_pos_number}", end='', file=f)
 
-    def do_prepare(self, module):
-        super().do_prepare(module)
-        self.variable.prepare(module)
+    def do_prepare(self):
+        super().do_prepare()
+        self.variable.prepare()
         self.type = self.variable.type
 
 
@@ -267,47 +283,28 @@ class Use(Entity):
         reference_module.instance_count += 1
         self.module.instance_number = reference_module.instance_count
         self.module.parent_module = parent_module
+        self.module.dotted_name = \
+          f"{parent_module.dotted_name}.{self.name.value}"
         self.module.link_uses()
 
     def dump_details(self, f):
         super().dump_details(f)
         print(f" module_name={self.module_name}", end='', file=f)
 
-    def prepare_used_module(self, module):
-        r'''
-        Broken out so that builtins and opmode get prepared before used modules
-        so that their Entities are initialized before being referenced in used
-        modules.
-        '''
-        #print("Use.prepare_used_module", module, self.module_name)
-        self.run_pre_hooks("prepare_used_module", module)
-        for expr in self.pos_arguments:
-            if isinstance(expr, Step):
-                expr.prepare_step(module, None, None)
-            else:
-                expr.prepare(module)
-        for _, exprs in self.kw_arguments:
-            for expr in exprs:
-                if isinstance(expr, Step):
-                    expr.prepare_step(module, None, None)
-                else:
-                    expr.prepare(module)
-        #print("Use.prepare_used_module", module, self.module_name,
-        #      "done with arguments")
+    def do_prepare(self):
+        #print("Use.prepare", self.module.dotted_name)
 
         #print(module, "use passing constant module parameters")
-
         pass_args(self.module, self.pos_arguments, self.kw_arguments,
-                  Use_param_compiler())
+                  Use_param_compiler(self))
 
-        self.module.prepare_module()
+        self.module.prepare_module_parameters()
 
         self.module.params_type.satisfied_by_arguments(
                                   Error_reporter(self.name),
                                   self.pos_arguments, self.kw_arguments)
-        self.module.prepare_used_modules()
-        self.run_post_hooks("prepare_used_module", module)
-        #print("Use.prepare_used_module", module, self.module_name, "done")
+        self.module.prepare_entities()
+        #print("Use.prepare", self.module.dotted_name, "done")
 
     @property
     def type(self):
@@ -333,6 +330,7 @@ class Typedef(Entity):
     def __init__(self, ident, type):
         Entity.__init__(self, ident)
         self.type = type
+        self.module = Last_module
 
     def __repr__(self):
         return f"<Typedef {self.name.value} {self.type}>"
@@ -345,22 +343,20 @@ class Typedef(Entity):
         return self.type
 
     def cmp_params(self):
-        return (self.module.filename, self.name.value.lower())
+        return (id(self.module), self.name.value.lower())
 
     def dump_details(self, f):
         super().dump_details(f)
         print(f" type={self.type}", end='', file=f)
 
-    def do_prepare(self, module):
-        super().do_prepare(module)
-        self.module = module
-        self.type.prepare(module)
+    def do_prepare(self):
+        super().do_prepare()
+        self.type.prepare()
 
 
 class Type(Symtable):
     immediate = True
     any_type = False
-    hidden = False
 
     def __eq__(self, b):
         return type(self) == type(b) and self.cmp_params() == b.cmp_params()
@@ -541,22 +537,22 @@ class Label_type(Type):
                                      for kw, rest in self.return_types[1]))))
         return tuple(ans)
 
-    def do_prepare(self, module):
-        super().do_prepare(module)
+    def do_prepare(self):
+        super().do_prepare()
         def prepare_type(t):
-            t.prepare(module)
+            t.prepare()
             return t
         for t in self.required_params:
-            t.prepare(module)
+            t.prepare()
         for t in self.optional_params:
-            t.prepare(module)
+            t.prepare()
         for (_, req, opt) in self.kw_params.values():
             for t in req:
-                t.prepare(module)
+                t.prepare()
             for t in opt:
-                t.prepare(module)
+                t.prepare()
         if hasattr(self, 'return_label_type'):
-            self.return_label_type.prepare(module)
+            self.return_label_type.prepare()
         # self.return_types have already been passed to the Label_type for
         # return_label_type and have been prepared by that Label_type.
 
@@ -742,14 +738,14 @@ class Param_block(Symtable):
                                  ident.lexpos, ident.lineno, ident.filename)
         return None
 
-    def do_prepare(self, module):
-        super().do_prepare(module)
+    def do_prepare(self):
+        super().do_prepare()
         #print("Param_block.do_prepare")
         self.num_required_params = len(self.required_params)
         self.num_optional_params = len(self.optional_params)
         for p in self.gen_parameters():
             #print("Param_block.do_prepare", p)
-            p.prepare(module)
+            p.prepare()
 
     def assign_passed_bits(self, next_bit_number):
         def get_bit_number():
@@ -845,13 +841,15 @@ class Namespace(Symtable):
 
     def do_prepare_entities(self):
         for obj in self.names.values():
-            obj.prepare(self)
+            obj.prepare()
 
 
 class Opmode(Namespace):
     def __init__(self, modules_seen=None):
+        global Last_module
         Namespace.__init__(self, scanner.file_basename())
         self.filename = scanner.filename()
+        self.dotted_name = self.name
 
         if modules_seen is not None:
             # {module_name: module}
@@ -859,6 +857,7 @@ class Opmode(Namespace):
             self.modules_seen = modules_seen
         self.next_set_bit = 0
         self.register()
+        Last_module = self
 
     def register(self):
         global Opmode_module
@@ -891,11 +890,11 @@ class Opmode(Namespace):
         builtins.link_uses()
         self.link_uses()
         print("setup: doing prepare")
-        builtins.prepare_module()
-        builtins.prepare_used_modules()
+        builtins.prepare_module_parameters()
+        builtins.prepare_entities()
         builtins.prepare_module_steps()
-        self.prepare_module()
-        self.prepare_used_modules()
+        self.prepare_module_parameters()
+        self.prepare_entities()
         self.prepare_module_steps()
         print("setup: done")
 
@@ -907,29 +906,20 @@ class Opmode(Namespace):
             use.copy_module(self)
         self.run_post_hooks("link_uses")
 
-    def prepare_module(self):
+    def prepare_module_parameters(self):
         r'''Called on each module instance.
         '''
-        #print(self.name, self.__class__.__name__, "prepare_module")
-        self.run_pre_hooks("prepare_module")
-        self.do_prepare_module()
-        self.run_post_hooks("prepare_module")
-        #print(self.name, self.__class__.__name__, "prepare_module -- done")
-
-    def do_prepare_module(self):
-        #print("Opmode.do_prepare_module", self.__class__.__name__, self.name)
-        self.prepare(self)   # declared in With_parameters
-
-    def prepare_used_modules(self):
-        #print(self.name, self.__class__.__name__, "prepare_used_modules")
-        self.prepare_entities()
-        for use in self.filter(Use):
-            #print(self.name, "link_uses doing", use)
-            use.prepare_used_module(self)
-        print(self.name, self.__class__.__name__,
-              "number of var-set bits used", self.next_set_bit)
+        #print(self.name, self.__class__.__name__, "prepare_module_parameters")
+        self.run_pre_hooks("prepare_module_parameters")
+        self.do_prepare_module_parameters()
+        self.run_post_hooks("prepare_module_parameters")
         #print(self.name, self.__class__.__name__,
-        #      "prepare_used_modules -- done")
+        #      "prepare_module_parameters -- done")
+
+    def do_prepare_module_parameters(self):
+        #print("Opmode.do_prepare_module_parameters", self.__class__.__name__,
+        #      self.name)
+        self.prepare()     # declared in With_parameters
 
     def prepare_module_steps(self):
         for use in self.filter(Use):
@@ -981,10 +971,10 @@ class With_parameters(Symtable):
             scanner.syntax_error("Parameter Not Found",
                                  ident.lexpos, ident.lineno, ident.filename)
 
-    def do_prepare(self, module):
-        super().do_prepare(module)
+    def do_prepare(self):
+        super().do_prepare()
         for pb in self.gen_param_blocks():
-            pb.prepare(module)
+            pb.prepare()
         self.check_for_duplicate_names()
         self.assign_passed_bits()
 
@@ -1029,6 +1019,9 @@ class Module(With_parameters, Opmode):
         self.instance_count = 0  # only used in the reference modules created
                                  # directly by the parser
 
+    def __repr__(self):
+        return f"<Module {self.dotted_name} ({self.name})>"
+
     def register(self):
         pass
 
@@ -1044,39 +1037,31 @@ class Module(With_parameters, Opmode):
         for step in self.steps:
             step.dump(f, indent)
 
-    def do_prepare_module(self):
+    def do_prepare_module_parameters(self):
         r'''Only called by setup on builtins module.
         '''
-        super().do_prepare_module()  # prepares parameters
+        super().do_prepare_module_parameters()  # prepares parameters
 
         # Make all module parameters constant variables.
         #
-        # Also hide module and type parameters.
+        # Also hide all parameters.
         for pb in self.gen_param_blocks():
             for p in pb.gen_parameters():
+                p.hidden = True
                 p.variable.constant = True
-                if p.variable.type == Builtin_type('module') or \
-                   p.variable.type == Builtin_type('type'):
-                    p.hidden = True
-                    p.variable.hidden = True
-                    p.variable.type.hidden = True
 
         self.params_type = Label_type('label', self.as_taking_blocks())
-        self.params_type.prepare(self)
+        self.params_type.prepare()
 
     def prepare_module_steps(self):
         #print(self, "prepare_module_steps")
-        last_label = None
-        last_fn_subr = None
+        last_step = None
         for step, next_step in pairwise(self.steps):
-            if isinstance(step, Subroutine):
-                last_fn_subr = step
-                last_label = step
-            elif isinstance(step, Label) and not step.hidden:
+            if isinstance(step, Label) and not step.hidden:
                 last_label = step
             assert last_label is not None
             last_label.reset()  # makes all temps available again
-            step.prepare_step(self, last_label, last_fn_subr)
+            step.prepare()
             if next_step is None or isinstance(next_step, Label):
                 if not step.is_final():
                     scanner.syntax_error("Statement must not fall-through",
@@ -1091,23 +1076,6 @@ class Module(With_parameters, Opmode):
 
 
 class Step(Symtable):
-    step_prepared = False
-
-    def prepare_step(self, module, last_label, last_fn_subr):
-        r'''Called once per instance.
-        '''
-        if not self.step_prepared:
-            self.step_prepared = True
-            self.run_pre_hooks("prepare_step", module, last_label, last_fn_subr)
-            self.do_prepare_step(module, last_label, last_fn_subr)
-            self.run_post_hooks("prepare_step", module, last_label,
-                                last_fn_subr)
-
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        r'''Override this in the subclasses.
-        '''
-        pass
-
     def deref(self):
         return self
 
@@ -1120,6 +1088,7 @@ class Label(With_parameters, Step, Entity):
     assoc = None
 
     def __init__(self, ident, namespace=None, hidden=False):
+        global Last_label
         Entity.__init__(self, ident, namespace)
         With_parameters.__init__(self)
         self.hidden = hidden
@@ -1127,33 +1096,40 @@ class Label(With_parameters, Step, Entity):
         self.last_temp_number = 0       # to make temp variable names unique
         self.last_label_number = 0      # to make new label names unique
         self.needs_dlt_mask = False
+        if not hidden:
+            Last_label = self
+        if namespace is not None:
+            assert isinstance(namespace, Module)
+            self.module = namespace
+        else:
+            self.module = Last_module
 
-    def new_label(self, module):
+    def new_label(self):
         self.last_label_number += 1
         ident = scanner.Token.dummy(
                       f"__{self.name.value}__dummy_{self.last_label_number}")
-        ans = Label(ident, namespace=module, hidden=True)
+        ans = Label(ident, namespace=self.module, hidden=True)
         return ans
 
-    def new_subr_ret_label(self, module):
+    def new_subr_ret_label(self):
         r'Create, prepare and return a new dummy subroutine return label.'
-        ans = self.new_label(module)
-        ans.prepare(module)
+        ans = self.new_label()
+        ans.prepare()
         return ans
 
-    def new_fn_ret_label(self, module, var_to_set):
+    def new_fn_ret_label(self, var_to_set):
         r'Create, prepare and return a new dummy function return label.'
-        ans = self.new_label(module)
+        ans = self.new_label()
         param = Required_parameter(var_to_set.name, ans)
-        ans.prepare(module)
+        ans.prepare()
         return ans
 
-    def do_prepare(self, module):
+    def do_prepare(self):
         #print(self.__class__.__name__, "do_prepare", self.name)
-        super().do_prepare(module)
+        super().do_prepare()
         self.type = Label_type(self.__class__.__name__, self.as_taking_blocks(),
                                self.get_return_types())
-        self.type.prepare(module)
+        self.type.prepare()
 
     def get_return_types(self):
         return None
@@ -1178,17 +1154,17 @@ class Label(With_parameters, Step, Entity):
             ans = self.create_variable(
                          f"__{self.name.value}__temp_{self.last_temp_number}",
                          type)
-            ans.prepare(self.parent_namespace)
             self.temps[type.deref()].add(ans)
         self.temps_taken.add(ans)
         return ans
 
     def create_variable(self, name, type):
+        assert isinstance(self.parent_namespace, Module)
         ans = Variable(
                 scanner.Token.dummy(name),
                 self.parent_namespace,
                 type=type)
-        ans.prepare(self.parent_namespace)
+        ans.prepare()
         return ans
 
     def need_dlt_mask(self):
@@ -1196,7 +1172,10 @@ class Label(With_parameters, Step, Entity):
 
 
 class Subroutine(Label):
-    pass
+    def __init__(self, ident):
+        global Last_fn_subr
+        Label.__init__(self, ident)
+        Last_fn_subr = self
 
 
 class Function(Subroutine):
@@ -1226,6 +1205,7 @@ class Statement(Step):
         self.lineno = lineno
         self.filename = scanner.filename()
         self.args = args
+        self.containing_label = Last_label
 
     def is_final(self):
         return False
@@ -1238,15 +1218,13 @@ class Statement(Step):
         print(f" lineno {self.lineno}", end='', file=f)
         print(f" {self.args}", end='', file=f)
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        assert last_label is not None
-        self.containing_label = last_label
+    def do_prepare(self):
+        super().do_prepare()
         prep_statements = []
         self.vars_used = set()
         def _prepare(obj):
             if isinstance(obj, Step):
-                obj.prepare_step(module, last_label, last_fn_subr)
+                obj.prepare()
                 prep_statements.extend(obj.prep_statements)
                 self.vars_used.update(obj.vars_used)
             elif isinstance(obj, (list, tuple)):
@@ -1274,8 +1252,12 @@ class Set(Statement):
         self.lvalue.set_as_lvalue()
         self.primary = self.args[1]
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
+        if self.lvalue.deref().constant:
+            scanner.syntax_error("Module parameter can not be SET",
+                                 self.lvalue.lexpos, self.lvalue.lineno,
+                                 self.lvalue.filename)
         self.lvalue.type.deref().can_take_type(Error_reporter(self.primary),
                                                self.primary.type)
 
@@ -1284,14 +1266,14 @@ class Native:
     def __init__(self, native_elements):
         self.native_elements = native_elements  # tuple of Expr|str
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
         prep_statements = []
         self.vars_used = set()
         segments = []
         for element in self.native_elements:
             if isinstance(element, Expr):
-                element.prepare_step(module, last_label, last_fn_subr)
+                element.prepare()
                 self.vars_used.update(element.vars_used)
                 prep_statements.extend(element.prep_statements)
                 segments.append(element.deref().code)
@@ -1316,16 +1298,16 @@ class Native_statement(Native, Statement):
 
 
 class Statement_with_arguments(Statement):
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        self.do_pre_arg_check_prepare(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
+        self.do_pre_arg_check_prepare()
         #print("label_type", repr(self.label_type), self.arguments[0],
         #      self.arguments[1])
         self.label_type.satisfied_by_arguments(self.error_reporter,
                                                self.arguments[0],
                                                self.arguments[1])
 
-    def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
+    def do_pre_arg_check_prepare(self):
         pass
 
 
@@ -1342,8 +1324,8 @@ class Goto(Statement_with_arguments):
     def is_final(self):
         return True
 
-    def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
-        super().do_pre_arg_check_prepare(module, last_label, last_fn_subr)
+    def do_pre_arg_check_prepare(self):
+        super().do_pre_arg_check_prepare()
         self.label_type = self.primary.type.deref()
 
 
@@ -1357,15 +1339,17 @@ class Return(Statement_with_arguments):
         self.from_opt = self.args[1]    # done processing
         self.to_opt = self.args[2]      # where the arguments are delivered
         self.error_reporter = Error_reporter(self)
+        if self.from_opt is None:
+            if Last_fn_subr is None:
+                scanner.syntax_error("Must follow a SUBROUTINE or FUNCTION",
+                                     self.lexpos, self.lineno, self.filename)
+            self.from_opt = Last_fn_subr
 
     def is_final(self):
         return True
 
-    def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
-        super().do_pre_arg_check_prepare(module, last_label, last_fn_subr)
-        if self.from_opt is None:
-            assert last_fn_subr is not None
-            self.from_opt = last_fn_subr
+    def do_pre_arg_check_prepare(self):
+        super().do_pre_arg_check_prepare()
         if self.to_opt is None:
             self.to_opt = self.from_opt
             self.dest_label = f"({self.to_opt.deref().code})->return_label"
@@ -1388,12 +1372,13 @@ class Call_statement(Statement_with_arguments):
         self.returning_to = self.args[2]
         self.final = self.returning_to is not None
         self.error_reporter = Error_reporter(self.primary)
+        self.last_label = Last_label
 
     def is_final(self):
         return self.final
 
-    def do_pre_arg_check_prepare(self, module, last_label, last_fn_subr):
-        super().do_pre_arg_check_prepare(module, last_label, last_fn_subr)
+    def do_pre_arg_check_prepare(self):
+        super().do_pre_arg_check_prepare()
         fn = self.primary.deref()
 
         # This is always verified to be a Label_type
@@ -1403,7 +1388,7 @@ class Call_statement(Statement_with_arguments):
 
         # set self.returning_to
         if self.returning_to is None:
-            new_label = last_label.new_subr_ret_label(module)
+            new_label = self.last_label.new_subr_ret_label()
             self.returning_to = new_label
             self.post_statements = (new_label.decl_code,)
 
@@ -1462,8 +1447,8 @@ class Opeq_statement(Statement):
     def is_final(self):
         return False
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
         if self.operator[0] == '%':
             if not self.lvalue.is_integer():
                 scanner.syntax_error("Must be an integer type",
@@ -1496,20 +1481,22 @@ class Done_statement(Statement):
     def __init__(self, lexpos, lineno, *args):
         Statement.__init__(self, lexpos, lineno, *args)
         self.ident = self.args[0]
+        self.containing_label = Last_label
+        if self.ident is None:
+            if Last_fn_subr is None:
+                scanner.syntax_error("Must follow a SUBROUTINE or FUNCTION",
+                                     self.lexpos, self.lineno, self.filename)
+            self.label = Last_fn_subr
+        self.module = Last_module
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        assert last_label is not None
-        self.containing_label = last_label
+    def do_prepare(self):
+        super().do_prepare()
         if self.ident is not None:
-            self.label = lookup(self.ident, module)
+            self.label = lookup(self.ident, self.module)
             if not isinstance(self.label, Subroutine):
                 scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
                                      self.ident.lexpos, self.ident.lineno,
                                      self.ident.filename)
-        else:
-            assert last_fn_subr is not None
-            self.label = last_fn_subr
 
 
 class Conditions(Step):
@@ -1528,6 +1515,8 @@ class Conditions(Step):
         r'conditions is ((mask, expr), ...)'
         self.lineno = lineno
         self.compile_conditions(conditions)
+        self.containing_label = Last_label
+        self.containing_label.need_dlt_mask()
 
     def compile_conditions(self, conditions):
         self.exprs = []  # exprs form bits in mask, ordered MSB to LSB
@@ -1619,15 +1608,12 @@ class Conditions(Step):
                                  self.dlt_mask.lineno,
                                  self.dlt_mask.filename)
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        assert last_label is not None
-        self.containing_label = last_label
-        last_label.need_dlt_mask()
+    def do_prepare(self):
+        super().do_prepare()
         prep_statements = []
         self.vars_used = set()
         for expr in self.exprs:
-            expr.prepare_step(module, last_label, last_fn_subr)
+            expr.prepare()
             if not expr.is_boolean():
                 scanner.syntax_error("Must be boolean expression",
                                      expr.lexpos, expr.lineno, expr.filename)
@@ -1732,10 +1718,10 @@ class Actions(Step):
         ans = sorted(frozenset(range(conditions.num_columns)) - seen)
         return ans
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
         for action in self.actions:
-            action.prepare_step(module, last_label, last_fn_subr)
+            action.prepare()
 
 
 class DLT(Step):
@@ -1744,10 +1730,10 @@ class DLT(Step):
         self.actions = actions          # Actions instance
         conditions.sync_actions(actions)
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        self.conditions.prepare_step(module, last_label, last_fn_subr)
-        self.actions.prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
+        self.conditions.prepare()
+        self.actions.prepare()
 
     def is_final(self):
         return self.actions.is_final()
@@ -1816,11 +1802,13 @@ class Reference(Expr):
         Expr.__init__(self, ident.lexpos, ident.lineno)
         self.ident = ident
         self.as_lvalue = False
+        self.module = Last_module
 
     def __repr__(self):
         return f"<Reference {self.ident.value}>"
 
     def deref(self):
+        self.prepare()
         try:
             return self.referent.deref()
         except AttributeError:
@@ -1832,12 +1820,13 @@ class Reference(Expr):
         current_namespace().make_variable(self.ident)
         self.as_lvalue = True
 
-    def do_prepare(self, module):
-        super().do_prepare(module)
+    def do_prepare(self):
+        super().do_prepare()
 
         # These should be the same for all instances (since the type is
         # defined in the module and can't be passed in as a module parameter).
-        self.referent = lookup(self.ident, module)
+        self.referent = lookup(self.ident, self.module)
+        self.referent.prepare()
         self.type = self.referent.deref().type
         #print("Reference", self.ident, "found", self.referent)
         if isinstance(self.referent.deref(), (Variable, Label)):
@@ -1860,10 +1849,6 @@ class Reference(Expr):
                                      self.ident.lexpos, self.ident.lineno,
                                      self.ident.filename)
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        self.prepare(module)
-
 
 class Dot(Expr):
     precedence = 100
@@ -1881,20 +1866,17 @@ class Dot(Expr):
         return f"<Dot {self.expr} {self.ident.value}>"
 
     def deref(self):
+        self.prepare()
         return self.referent.deref()
 
     def set_as_lvalue(self):
         #current_namespace().make_variable(self.ident)
         self.as_lvalue = True
 
-    def do_prepare(self, module):
-        super().do_prepare(module)
-        self.prepare_step(module, None, None)
-
     # self.type has to be done for each instance...
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        self.expr.prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
+        self.expr.prepare()
         if self.ident == 'type':
             if not self.expr.deref().immediate:
                 scanner.syntax_error("Compile-time value expected with .TYPE",
@@ -1910,6 +1892,7 @@ class Dot(Expr):
                                      self.expr.lexpos, self.expr.lineno,
                                      self.expr.filename)
             self.referent = self.expr.deref().value.lookup(self.ident)
+            self.referent.prepare()
             self.type = self.referent.type
             step = self.referent.deref()
             if self.as_lvalue:
@@ -1932,11 +1915,13 @@ class Dot(Expr):
 
 class Subscript(Expr):
     var_set = None
+    constant = False
 
     def __init__(self, array_expr, subscript_exprs):
         Expr.__init__(self, array_expr.lexpos, array_expr.lineno)
         self.array_expr = array_expr
         self.subscript_exprs = subscript_exprs
+        self.containing_label = Last_label
 
     def __repr__(self):
         return f"<Subscript {self.array_expr} {self.subscript_exprs}>"
@@ -1944,13 +1929,11 @@ class Subscript(Expr):
     def set_as_lvalue(self):
         pass
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        assert last_label is not None
-        self.containing_label = last_label
+    def do_prepare(self):
+        super().do_prepare()
         prep_statements = []
         self.vars_used = set()
-        self.array_expr.prepare_step(module, last_label, last_fn_subr)
+        self.array_expr.prepare()
         prep_statements.extend(self.array_expr.deref().prep_statements)
         self.vars_used.update(self.array_expr.deref().vars_used)
         if not isinstance(self.array_expr.deref(), Variable):
@@ -1958,7 +1941,7 @@ class Subscript(Expr):
                                  self.array_expr.lexpos, self.array_expr.lineno,
                                  self.array_expr.filename)
         for subscript in self.subscript_exprs:
-            subscript.prepare_step(module, last_label, last_fn_subr)
+            subscript.prepare()
             prep_statements.extend(subscript.deref().prep_statements)
             self.vars_used.update(subscript.deref().vars_used)
         dims = len(self.array_expr.deref().dimensions)
@@ -1981,22 +1964,24 @@ class Got_keyword(Expr):
     '''
     type = Builtin_type("boolean")
 
-    def __init__(self, lexpos, lineno, keyword, label=None, module=False):
+    def __init__(self, lexpos, lineno, keyword, label=None, in_module=False):
         Expr.__init__(self, lexpos, lineno)
         self.keyword = keyword  # Token
-        self.label = label
-        self.module = module
+        if label is None:
+            self.label = Last_label
+        else:
+            self.label = label
+        self.in_module = in_module
+        self.module = Last_module
 
     def __repr__(self):
         return f"<Got_keyword {self.keyword.value}>"
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        if self.module:
-            pb = module.kw_parameters.get(self.keyword)
+    def do_prepare(self):
+        super().do_prepare()
+        if self.in_module:
+            pb = self.module.kw_parameters.get(self.keyword)
         else:
-            if self.label is None:
-                self.label = last_label
             pb = self.label.kw_parameters.get(self.keyword)
         if pb is None:
             scanner.syntax_error("Keyword Not Found",
@@ -2007,7 +1992,7 @@ class Got_keyword(Expr):
                                  self.keyword.lexpos, self.keyword.lineno,
                                  self.keyword.filename)
         self.bit_number = pb.kw_passed_bit
-        if self.module:
+        if self.in_module:
             self.immediate = True
             self.value = pb.passed
 
@@ -2017,22 +2002,24 @@ class Got_param(Expr):
     '''
     type = Builtin_type("boolean")
 
-    def __init__(self, lexpos, lineno, ident, label=None, module=False):
+    def __init__(self, lexpos, lineno, ident, label=None, in_module=False):
         Expr.__init__(self, lexpos, lineno)
         self.ident = ident
-        self.label = label
-        self.module = module
+        if label is None:
+            self.label = Last_label
+        else:
+            self.label = label
+        self.in_module = in_module
+        self.module = Last_module
 
     def __repr__(self):
         return f"<Got_param {self.ident.value}>"
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        if self.module:
-            obj = module
+    def do_prepare(self):
+        super().do_prepare()
+        if self.in_module:
+            obj = self.module
         else:
-            if self.label is None:
-                self.label = last_label
             obj = self.label
         found = False
         for pb in obj.gen_param_blocks():
@@ -2040,7 +2027,7 @@ class Got_param(Expr):
             if param is not None:
                 if isinstance(param, Optional_parameter):
                     self.bit_number = param.passed_bit
-                    if self.module:
+                    if self.in_module:
                         self.immediate = True
                         self.value = param.passed
                     break
@@ -2066,17 +2053,16 @@ class Call_fn(Expr):
 
         # ((KEYWORD_TOKEN, (primary, ...)), ...)
         self.kw_arguments = kw_arguments 
+        self.containing_label = Last_label
 
     def __repr__(self):
         return f"<Call_fn {self.primary} {self.pos_arguments} " \
                 f"{self.kw_arguments}>"
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
+    def do_prepare(self):
         # self.type has to be done for each instance...
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        assert last_label is not None
-        self.containing_label = last_label
-        self.primary.prepare_step(module, last_label, last_fn_subr)
+        super().do_prepare()
+        self.primary.prepare()
         prep_statements = list(self.primary.prep_statements).copy()
         self.vars_used = set(self.primary.vars_used).copy()
         fn_type = self.primary.type.deref()
@@ -2089,20 +2075,20 @@ class Call_fn(Expr):
                                  self.primary.lexpos, self.primary.lineno,
                                  self.primary.filename)
         for expr in self.pos_arguments:
-            expr.prepare_step(module, last_label, last_fn_subr)
+            expr.prepare()
             prep_statements.extend(expr.prep_statements)
             self.vars_used.update(expr.vars_used)
         for _, pos_arguments in self.kw_arguments:
             for expr in pos_arguments:
-                expr.prepare_step(module, last_label, last_fn_subr)
+                expr.prepare()
                 prep_statements.extend(expr.prep_statements)
                 self.vars_used.update(expr.vars_used)
         fn_type.satisfied_by_arguments(Error_reporter(self.primary),
                                        self.pos_arguments, self.kw_arguments)
         self.type = fn_type.return_types[0][0][0]
-        temp_var = last_label.get_temp(self.type)
+        temp_var = self.containing_label.get_temp(self.type)
         self.code = temp_var.code
-        self.ret_label = last_label.new_fn_ret_label(module, temp_var)
+        self.ret_label = self.containing_label.new_fn_ret_label(temp_var)
         self.prep_statements = tuple(prep_statements)
 
 
@@ -2115,9 +2101,9 @@ class Unary_expr(Expr):
     def __repr__(self):
         return f"<Unary_expr {self.operator} {self.expr}>"
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        self.expr.prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
+        self.expr.prepare()
         if self.operator in ('-', 'abs'):
             if not self.expr.is_numeric():
                 scanner.syntax_error("Must be a numeric type",
@@ -2183,10 +2169,10 @@ class Binary_expr(Expr):
     def __repr__(self):
         return f"<Binary_expr {self.expr1} {self.operator} {self.expr2}>"
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        self.expr1.prepare_step(module, last_label, last_fn_subr)
-        self.expr2.prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
+        self.expr1.prepare()
+        self.expr2.prepare()
 
         result_type, arg_type, immed_fn = self.operator_map[self.operator]
 
@@ -2265,24 +2251,26 @@ class Binary_expr(Expr):
 
 
 class Return_label(Expr):
-    def __init__(self, lexpos, lineno, label=None):
+    def __init__(self, lexpos, lineno, label_ident=None):
         #print("Return_label", lexpos, lineno, label)
         Expr.__init__(self, lexpos, lineno)
-        self.label = label      # IDENT
-
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
-        if self.label is None:
-            if last_fn_subr is None:
+        self.label_ident = label_ident      # IDENT
+        if self.label_ident is None:
+            if Last_fn_subr is None:
                 scanner.syntax_error("Must follow a SUBROUTINE or FUNCTION",
                                      self.lexpos, self.lineno, self.filename)
-            self.label = last_fn_subr
-        else:
-            self.label = module.lookup(self.label)
+            self.label = Last_fn_subr
+        self.module = Last_module
+
+    def do_prepare(self):
+        super().do_prepare()
+        if self.label_ident is not None:
+            self.label = self.module.lookup(self.label_ident)
             if not isinstance(self.label, Subroutine):
                 scanner.syntax_error("Must be a SUBROUTINE or FUNCTION",
-                                     self.label.lexpos, self.label.lineno,
-                                     self.label.filename)
+                                     self.label_ident.lexpos,
+                                     self.label_ident.lineno,
+                                     self.label_ident.filename)
         self.type = self.label.type.return_label_type
         #print("Return_label: label", self.label.name.value)
         #print("Return_label: label_type", self.type.label_type)
@@ -2300,8 +2288,8 @@ class Native_expr(Native, Expr):
         Expr.__init__(self, lexpos, lineno)
         Native.__init__(self, native_elements)
 
-    def do_prepare_step(self, module, last_label, last_fn_subr):
-        super().do_prepare_step(module, last_label, last_fn_subr)
+    def do_prepare(self):
+        super().do_prepare()
         self.code = f"({self.code})"
 
 
@@ -2362,6 +2350,9 @@ def pass_args(with_args, pos_args, kw_args, param_compiler):
 
 
 class Use_param_compiler:
+    def __init__(self, use):
+        self.use = use
+
     def set_param_block_passed(self, param_block, passed):
         param_block.passed = passed
 
@@ -2369,14 +2360,23 @@ class Use_param_compiler:
         param.passed = passed
 
     def pair_param(self, param_block, param, expr):
+        expr.prepare()
         if expr.deref().immediate:
             param.variable.immediate = True
             param.variable.value = expr.deref().value
-            print(f"Use setting {param} to {param.variable.value}")
-            # We can skip setting the bit in module.vars_set since there is no
-            # way to test those bits in the code...
+            param.variable.hidden = True
+            #print(f"Use setting {param} in {self.use.module.dotted_name} "
+            #        f"to {param.variable.value}")
+
+            # We can skip setting the bit in module.vars_set since the only
+            # module parameters that are real Variables are the ones that have
+            # not been passed in.
         else:
-            print(f"Use skipping {param} with {expr}")
+            param.variable.hidden = True
+            param.variable.has_expr = True
+            param.variable.expr = expr
+            #print(f"Use setting {param} in {self.use.module.dotted_name} "
+            #        f"to expr {expr}")
 
 
 class Error_reporter:

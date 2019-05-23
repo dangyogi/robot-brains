@@ -88,7 +88,7 @@ def create_cycle_irun_code():
         print("'cycle.irun' must only return an INTEGER", file=sys.stderr)
         sys.exit(1)
     var = run.create_variable('__exit_status__', integer)
-    done_label = run.new_fn_ret_label(run.parent_namespace, var)
+    done_label = run.new_fn_ret_label(var)
     terminate = cycle.lookup(Token.dummy('terminate'), error_not_found=False)
     if terminate is None or type(terminate.deref()) is not symtable.Label:
         print("Could not find 'terminate' label in 'cycle' module",
@@ -143,14 +143,8 @@ def assign_module_names(m):
     if isinstance(m, symtable.Module):
         m.N_global_name = \
           f"{translate_name(m.name)}__module__{m.instance_number}"
-        if m.parent_module is not None and \
-           isinstance(m.parent_module, symtable.Module):
-            m.dotted_name = f"{m.parent_module.dotted_name}.{m.name}"
-        else:
-            m.dotted_name = m.name
     else:
         m.N_global_name = translate_name(m.name) + "__opmode"
-        m.dotted_name = m.name
     m.N_descriptor_name = m.N_global_name + "__desc"
     m.N_label_descriptor_name = m.N_global_name + "__label_desc"
     m.N_struct_name = m.N_global_name + "__instance_s"
@@ -159,7 +153,8 @@ def assign_module_names(m):
     # list of fns that write elements into the module struct definition
 
 
-@todo_with_args(symtable.Opmode, "prepare_module", Module_instance_definitions)
+@todo_with_args(symtable.Opmode, "prepare_module_parameters",
+                Module_instance_definitions)
 def write_module_instance_definition(module):
     print(file=Java_file)
     print(f"struct {module.N_struct_name} {{", file=Java_file)
@@ -175,7 +170,8 @@ def write_module_instance_definition(module):
     print("};", file=Java_file)
 
 
-@todo_with_args(symtable.Opmode, "prepare_module", Module_instance_declarations)
+@todo_with_args(symtable.Opmode, "prepare_module_parameters",
+                Module_instance_declarations)
 def write_module_instance_declaration(module):
     print(file=Java_file)
     print(f"struct {module.N_struct_name} {module.N_global_name};", file=Java_file)
@@ -186,7 +182,8 @@ def add_module_instance(m):
     Module_instances.append(m.N_descriptor_name)
 
 
-@todo_with_args(symtable.Opmode, "prepare_module", Module_descriptors)
+@todo_with_args(symtable.Opmode, "prepare_module_parameters",
+                Module_descriptors)
 def write_module_descriptor(m):
     print(file=Java_file)
     print(f"struct module_descriptor_s {m.N_descriptor_name} = {{", file=Java_file)
@@ -208,36 +205,45 @@ def write_module_descriptor(m):
     print("};", file=Java_file)
 
 
-@todo_with_args(symtable.Opmode, "prepare_module",
+@todo_with_args(symtable.Opmode, "prepare_module_parameters",
                 Set_module_descriptor_pointers)
 def set_module_descriptor_pointer(m):
     print(f"    {m.N_global_name}.descriptor = &{m.N_descriptor_name};",
           file=Java_file)
 
 
-@todo_with_args(symtable.Module, "prepare_module", Init_labels)
+@todo_with_args(symtable.Module, "prepare_module_parameters", Init_labels)
 def init_module_label(module):
     print(f"    {module.N_label_descriptor_name}.module = "
             f"&{module.N_descriptor_name};",
           file=Java_file)
 
 
-@todo_with_args(symtable.Module, "prepare_module", Label_descriptors)
+@todo_with_args(symtable.Module, "prepare_module_parameters", Label_descriptors)
 def write_module_label_descriptor(module):
     write_label_descriptor(module, module)
 
 
-@todo_with_args(symtable.Module, "prepare_module", Module_code)
+@todo_with_args(symtable.Module, "prepare_module_parameters", Module_code)
 def write_module_code(module):
     for step in module.steps:
         step.write_code(module)
 
 
-@todo_with_args(symtable.Use, "prepare_used_module",
-                Initialize_module_parameters)
-def write_use_args(self, module):
-    write_args('&' + self.module.N_label_descriptor_name,
-               self.module.params_type, self.pos_arguments, self.kw_arguments)
+@todo_with_args(symtable.Use, "prepare", Initialize_module_parameters)
+def write_params_passed(self):
+    params_passed = 0
+    for pb in self.module.gen_param_blocks():
+        if pb.optional:
+            if pb.passed:
+                params_passed |= 1 << pb.kw_passed_bit
+        if not pb.optional or pb.passed:
+            for p in pb.optional_params:
+                if p.passed:
+                    params_passed |= 1 << p.passed_bit
+    print(f"    {self.module.N_label_descriptor_name}.params_passed = "
+                f"{hex(params_passed)};",
+          file=Java_file)
 
 
 def write_label_code(label, module, extra_indent=0):
@@ -290,7 +296,7 @@ def check_vars_used(label, vars_module, vars_used, extra_indent):
     vars_used = tuple(vars_used)
     mask = sum(1 << v.set_bit for v in vars_used)
     bits_set = f"{vars_module.N_descriptor_name}.vars_set & {hex(mask)}"
-    print(' ' * indent, f"if ({bits_set} != {hex(mask)}) {{",
+    print(' ' * indent, f"if (({bits_set}) != {hex(mask)}) {{",
           sep='', file=Java_file)
     print(' ' * indent,
           f"    report_var_not_set(&{label.N_label_descriptor_name},",
@@ -338,12 +344,11 @@ def write_args(dest_label, label_type, pos_args, kw_args, extra_indent=0):
             keyword = f'"{pb_name}"'
         for i, (type, arg) in enumerate(zip(chain(req_types, opt_types), args)):
             type = type.deref()
-            if not type.hidden:
-                print(' ' * indent,
-                      f'*({translate_type(type)} *)'
-                      f'param_location({dest_label}, {keyword}, {i}) = '
-                      f'{arg.deref().code};',
-                      sep='', file=Java_file)
+            print(' ' * indent,
+                  f'*({translate_type(type)} *)'
+                  f'param_location({dest_label}, {keyword}, {i}) = '
+                  f'{arg.deref().code};',
+                  sep='', file=Java_file)
     write_pb(label_type.required_params, label_type.optional_params, pos_args)
     for keyword, args in kw_args:
         opt, req_types, opt_types = label_type.kw_params[keyword]
@@ -473,10 +478,10 @@ symtable.DLT_MAP.write_code = write_dlt_map_code
 
 
 @symtable.Label.as_pre_hook("prepare")
-def assign_label_names(label, module):
+def assign_label_names(label):
     # set N_global_name: globally unique name
     label.N_local_name = f"{translate_name(label.name)}__label"
-    label.N_global_name = f"{module.N_global_name}__{label.N_local_name}"
+    label.N_global_name = f"{label.module.N_global_name}__{label.N_local_name}"
     label.N_label_descriptor_name = label.N_global_name + "__desc"
     label.N_dlt_mask_name = f"{label.N_local_name}__dlt_mask"
     label.code = '&' + label.N_label_descriptor_name
@@ -484,8 +489,8 @@ def assign_label_names(label, module):
 
 
 @todo_with_args(symtable.Label, "prepare", Label_descriptors)
-def write_label_label_descriptor(label, module):
-    write_label_descriptor(label, module)
+def write_label_label_descriptor(label):
+    write_label_descriptor(label, label.module)
 
 
 def write_label_descriptor(label, module):
@@ -550,9 +555,9 @@ def write_label_descriptor(label, module):
 
 
 @todo_with_args(symtable.Label, "prepare", Init_labels)
-def init_label(label, module):
+def init_label(label):
     print(f"    {label.N_label_descriptor_name}.module = "
-            f"&{module.N_descriptor_name};",
+            f"&{label.module.N_descriptor_name};",
           file=Java_file)
     print(
       f"    {label.N_label_descriptor_name}.label = &&{label.N_global_name};",
@@ -560,14 +565,21 @@ def init_label(label, module):
 
 
 @symtable.Variable.as_post_hook("prepare")
-def assign_variable_names(var, module):
+def assign_variable_names(var):
     var.N_local_name = translate_name(var.name)
-    var.precedence, var.assoc = Precedence_lookup['.']
-    var.code = f"{var.parent_namespace.N_global_name}.{var.N_local_name}"
+    if var.has_expr:
+        expr = var.expr.deref()
+        var.precedence, var.assoc = expr.precedence, expr.assoc
+        var.prep_statements, var.vars_used = \
+          expr.prep_statements, expr.vars_used
+        var.code = expr.code
+    else:
+        var.precedence, var.assoc = Precedence_lookup['.']
+        var.code = f"{var.parent_namespace.N_global_name}.{var.N_local_name}"
 
 
-@symtable.Literal.as_post_hook("prepare_step")
-def compile_literal(literal, module, last_label, last_fn_subr):
+@symtable.Literal.as_post_hook("prepare")
+def compile_literal(literal):
     if isinstance(literal.value, bool):
         literal.code = "1" if literal.value else "0"
     elif isinstance(literal.value, (int, float)):
@@ -578,8 +590,8 @@ def compile_literal(literal, module, last_label, last_fn_subr):
         literal.code = f'"{escaped_str}"'
 
 
-@symtable.Subscript.as_post_hook("prepare_step")
-def compile_subscript(subscript, module, last_label, last_fn_subr):
+@symtable.Subscript.as_post_hook("prepare")
+def compile_subscript(subscript):
     subscript.precedence, subscript.assoc = Precedence_lookup['[']
     array_code = wrap(subscript.array_expr, subscript.precedence, 'left')
     sub_codes = [sub_expr.deref().code
@@ -593,8 +605,8 @@ def compile_subscript(subscript, module, last_label, last_fn_subr):
     )
 
 
-@symtable.Got_keyword.as_post_hook("prepare_step")
-def compile_got_keyword(self, module, last_label, last_fn_subr):
+@symtable.Got_keyword.as_post_hook("prepare")
+def compile_got_keyword(self):
     if self.immediate:
         self.precedence = 100
         self.assoc = None
@@ -605,8 +617,8 @@ def compile_got_keyword(self, module, last_label, last_fn_subr):
                     f" & {hex(1 << self.bit_number)}"
 
 
-@symtable.Got_param.as_post_hook("prepare_step")
-def compile_got_param(self, module, last_label, last_fn_subr):
+@symtable.Got_param.as_post_hook("prepare")
+def compile_got_param(self):
     if self.immediate:
         self.precedence = 100
         self.assoc = None
@@ -617,8 +629,8 @@ def compile_got_param(self, module, last_label, last_fn_subr):
                     f" & {hex(1 << self.bit_number)}"
 
 
-@symtable.Call_fn.as_post_hook("prepare_step")
-def compile_call_fn(self, module, last_label, last_fn_subr):
+@symtable.Call_fn.as_post_hook("prepare")
+def compile_call_fn(self):
     self.prep_statements = self.prep_statements + (self.write_call,)
 
 
@@ -638,8 +650,8 @@ def write_call_fn_call(self, extra_indent):
 symtable.Call_fn.write_call = write_call_fn_call
 
 
-@symtable.Unary_expr.as_post_hook("prepare_step")
-def compile_unary_expr(self, module, last_label, last_fn_subr):
+@symtable.Unary_expr.as_post_hook("prepare")
+def compile_unary_expr(self):
     if self.immediate:
         self.precedence = 100
         self.assoc = None
@@ -652,8 +664,8 @@ def compile_unary_expr(self, module, last_label, last_fn_subr):
           compile_unary(self.operator, self.expr)
 
 
-@symtable.Binary_expr.as_post_hook("prepare_step")
-def compile_binary_expr(self, module, last_label, last_fn_subr):
+@symtable.Binary_expr.as_post_hook("prepare")
+def compile_binary_expr(self):
     if self.immediate:
         self.precedence = 100
         self.assoc = None
@@ -670,8 +682,8 @@ def compile_binary_expr(self, module, last_label, last_fn_subr):
           compile_binary(self.expr1, self.operator, self.expr2)
 
 
-@symtable.Return_label.as_post_hook("prepare_step")
-def compile_return_label(self, module, last_label, last_fn_subr):
+@symtable.Return_label.as_post_hook("prepare")
+def compile_return_label(self):
     self.precedence, self.assoc = Precedence_lookup['.']
     self.code = f"{self.label.N_label_descriptor_name}.return_label"
 
@@ -698,7 +710,9 @@ Todo_lists = (
 
 Precedence = (  # highest to lowest
     ('left', '.', '(', '[', '->'),
-    ('right', 'UMINUS', '++', '--', '!', '~', '&', '&&', 'sizeof'),
+    ('right', 'UMINUS', '++', '--', '!', '~', 'sizeof',
+              #'&', '&&',   # UNARY!
+              ),
     ('left', '*', '/', '%'),
     ('left', '+', '-'),
     ('left', '<<', '>>'),

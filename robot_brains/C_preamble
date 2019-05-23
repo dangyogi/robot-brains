@@ -62,7 +62,7 @@ struct param_block_descriptor_s { // initialized outside of main
 
 
 struct module_descriptor_s {      // initialized outside main
-    char *name;
+    char *name;                   // dotted_name
     char *filename;
     struct label_descriptor_s *module_params;
     unsigned long vars_set;       // one bit per var, init to 0 outside of main
@@ -140,8 +140,8 @@ report_var_not_set(struct label_descriptor_s *containing_label,
                              var_name);
             }
         }
-        expected >> 1;
-        got >> 1;
+        expected >>= 1;
+        got >>= 1;
     }
 
     va_end(valist);
