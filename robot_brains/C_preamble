@@ -17,6 +17,12 @@
 // sigaction
 #include <signal.h>
 
+// clock_gettime, clock_nanosleep
+#include <time.h>
+
+// defines system errno variable (not set by clock_nanosleep!)
+#include <errno.h>
+
 
 struct label_descriptor_s {
     /////////////// initialized outside of main:
@@ -74,6 +80,9 @@ struct module_descriptor_s {      // initialized outside main
 
 
 #define FLAG_RUNNING            0x01
+
+
+struct timespec Timespec;  // time_t tv_sec; long tv_nsec
 
 
 // to get back into main
