@@ -484,7 +484,7 @@ def assign_label_names(label):
     label.N_label_descriptor_name = label.N_global_name + "__desc"
     label.N_dlt_mask_name = f"{label.N_local_name}__dlt_mask"
     label.code = '&' + label.N_label_descriptor_name
-    label.decl_code = label.N_global_name + ':'
+    label.decl_code = label.N_global_name + ': ;'
 
 
 @todo_with_args(symtable.Label, "prepare", Label_descriptors)
