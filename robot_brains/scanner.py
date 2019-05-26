@@ -201,7 +201,7 @@ literals = "+-*/%^?<>.,()[]{}"
 
 
 def t_CONTINUATION(t):
-    r'\n[ ]*->'
+    r'\n[ |]*->'
     #print("t_CONTINUATION", repr(t.value), 
     #      "at", t.lineno, t.lexpos)
     t.lexer.lineno += 1
